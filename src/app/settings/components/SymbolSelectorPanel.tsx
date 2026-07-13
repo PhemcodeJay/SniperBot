@@ -30,27 +30,23 @@ export default function SymbolSelectorPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch real symbols and data from Bybit
   useEffect(() => {
     const fetchSymbols = async () => {
       setIsLoading(true);
       setError(null);
       
       try {
-        // Fetch ticker data for all symbols
         const response = await fetch('https://api.bybit.com/v5/market/tickers?category=linear');
         const data = await response.json();
         
         if (data.retCode === 0 && data.result?.list) {
           const tickers = data.result.list;
           
-          // Map to our symbol data structure
           const mappedSymbols: SymbolData[] = tickers.map((ticker: any) => {
             const volume = parseFloat(ticker.volume24h) || 0;
             const price = parseFloat(ticker.lastPrice) || 0;
             const change24h = parseFloat(ticker.price24hPcnt) * 100 || 0;
             
-            // Categorize based on market cap or common knowledge
             let category = 'Alt';
             const symbol = ticker.symbol;
             if (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'].includes(symbol)) {
@@ -71,11 +67,10 @@ export default function SymbolSelectorPanel() {
             };
           });
           
-          // Filter for USDT pairs and sort by volume
           const usdtPairs = mappedSymbols
             .filter(s => s.symbol.endsWith('USDT'))
             .sort((a, b) => parseFloat(b.volume) - parseFloat(a.volume))
-            .slice(0, 50); // Top 50 by volume
+            .slice(0, 50);
           
           setSymbols(usdtPairs);
         } else {
@@ -83,7 +78,6 @@ export default function SymbolSelectorPanel() {
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load symbols');
-        // Fallback to mock data if API fails
         setSymbols([]);
       } finally {
         setIsLoading(false);
@@ -144,7 +138,7 @@ export default function SymbolSelectorPanel() {
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-negative-subtle border border-negative/20 text-negative text-xs">
-          ⚠️ {error} — Using cached data
+          ⚠️ {error}
         </div>
       )}
 

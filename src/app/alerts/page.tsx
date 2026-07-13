@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { Bell, Check, X, Filter, Trash2, Settings, RefreshCw, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface Alert {
   id: string;
@@ -32,7 +33,8 @@ interface NotificationSettings {
 // Bybit API endpoints
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
-  kline: 'https://api.bybit.com/v5/market/kline',
+  positions: 'https://api.bybit.com/v5/position/list',
+  orderHistory: 'https://api.bybit.com/v5/order/history',
 };
 
 const BYBIT_WS = {
@@ -40,6 +42,13 @@ const BYBIT_WS = {
 };
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+
+// Helper to generate Bybit signature
+const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+  const crypto = require('crypto');
+  const paramStr = timestamp + apiSecret + recvWindow + params;
+  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+};
 
 const ALERT_COLORS = {
   signal: { bg: 'bg-blue-50 dark:bg-blue-950/20', text: 'text-blue-700 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
@@ -62,6 +71,8 @@ export default function AlertsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [lastAlertTime, setLastAlertTime] = useState<number>(Date.now());
   const [marketData, setMarketData] = useState<Record<string, any>>({});
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [isApiConnected, setIsApiConnected] = useState(false);
 
   const [notifSettings, setNotifSettings] = useState<NotificationSettings>({
     highConfidenceSignals: true,
@@ -78,6 +89,15 @@ export default function AlertsPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get API credentials
+  const getApiCredentials = () => {
+    return {
+      apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
+      apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
+      isTestnet: true,
+    };
+  };
 
   // Load settings from localStorage
   useEffect(() => {
@@ -185,21 +205,27 @@ export default function AlertsPage() {
     return null;
   };
 
-  // Fetch initial market data and generate alerts
+  // Fetch real data from Bybit
   const fetchAlerts = async () => {
     try {
       setIsLoading(true);
       const newAlerts: Alert[] = [];
       
-      const promises = SUPPORTED_SYMBOLS.map(symbol =>
+      const { apiKey, apiSecret, isTestnet } = getApiCredentials();
+      const hasApiKeys = apiKey && apiSecret;
+      
+      // Always fetch ticker data
+      const tickerPromises = SUPPORTED_SYMBOLS.map(symbol =>
         fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`)
           .then(r => r.json())
+          .catch(() => null)
       );
       
-      const results = await Promise.all(promises);
+      const tickerResults = await Promise.all(tickerPromises);
       
-      results.forEach((result: any) => {
-        if (result.retCode === 0 && result.result?.list?.length > 0) {
+      // Process ticker data for alerts
+      tickerResults.forEach((result: any) => {
+        if (result && result.retCode === 0 && result.result?.list?.length > 0) {
           const ticker = result.result.list[0];
           const symbol = ticker.symbol;
           setMarketData(prev => ({ ...prev, [symbol]: ticker }));
@@ -211,11 +237,69 @@ export default function AlertsPage() {
         }
       });
       
+      // If API keys exist, fetch positions and trades for alerts
+      if (hasApiKeys) {
+        const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+        const timestamp = Date.now().toString();
+        const recvWindow = '5000';
+        const params = '';
+        
+        const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+        
+        // Fetch positions
+        const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
+          method: 'GET',
+          headers: {
+            'X-BAPI-API-KEY': apiKey,
+            'X-BAPI-TIMESTAMP': timestamp,
+            'X-BAPI-SIGN': signature,
+            'X-BAPI-RECV-WINDOW': recvWindow,
+          },
+        });
+        
+        const positionsData = await positionsResponse.json();
+        
+        // Generate alerts for open positions
+        if (positionsData.retCode === 0 && positionsData.result?.list) {
+          positionsData.result.list.forEach((pos: any) => {
+            const size = parseFloat(pos.size);
+            if (size !== 0) {
+              const side = pos.side === 'Buy' ? 'LONG' : 'SHORT';
+              const pnl = parseFloat(pos.unrealisedPnl || 0);
+              const symbol = pos.symbol;
+              const entryPrice = parseFloat(pos.avgPrice);
+              const markPrice = parseFloat(pos.markPrice);
+              
+              // Alert for significant P&L (> 5% of position value)
+              const positionValue = entryPrice * Math.abs(size);
+              if (Math.abs(pnl) > positionValue * 0.05) {
+                newAlerts.push({
+                  id: `alert-pos-${symbol}-${Date.now()}`,
+                  type: 'trade',
+                  priority: Math.abs(pnl) > positionValue * 0.1 ? 'high' : 'medium',
+                  title: `${pnl >= 0 ? '📈' : '📉'} Position Update: ${symbol}`,
+                  message: `${side} position ${pnl >= 0 ? 'profitable' : 'in loss'} | P&L: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} | Entry: $${entryPrice.toFixed(2)} | Current: $${markPrice.toFixed(2)}`,
+                  time: 'Just now',
+                  read: false,
+                  timestamp: Date.now(),
+                  symbol,
+                  price: markPrice,
+                  change24h: 0,
+                });
+              }
+            }
+          });
+        }
+        
+        setIsApiConnected(true);
+      } else {
+        setIsApiConnected(false);
+      }
+      
       // Sort by timestamp descending and limit to 50
       const sortedAlerts = newAlerts.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
       setAlerts(prev => {
         const combined = [...sortedAlerts, ...prev];
-        // Remove duplicates by id
         const unique = Array.from(new Map(combined.map(a => [a.id, a])).values());
         return unique.slice(0, 50);
       });
@@ -237,7 +321,9 @@ export default function AlertsPage() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        console.log('WebSocket connected');
         setConnectionStatus('connected');
+        setReconnectAttempts(0);
         ws.send(JSON.stringify({
           op: 'subscribe',
           args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
@@ -253,7 +339,6 @@ export default function AlertsPage() {
             if (ticker && ticker.symbol) {
               setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
               
-              // Generate alert from live data
               const alert = generateAlertFromMarketData(ticker.symbol, ticker);
               if (alert) {
                 setAlerts(prev => [alert, ...prev].slice(0, 50));
@@ -268,23 +353,38 @@ export default function AlertsPage() {
         }
       };
 
-      ws.onerror = () => {
-        setConnectionStatus('error');
+      ws.onerror = (event) => {
+        console.warn('WebSocket error:', event);
+        // Don't set error state here - onclose handles reconnection
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code);
         setConnectionStatus('disconnected');
         stopHeartbeat();
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
+        
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        
+        // Only attempt reconnect if not a normal closure
+        if (event.code !== 1000) {
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, delay);
+        }
       };
     } catch (err) {
+      console.error('Failed to connect WebSocket:', err);
       setConnectionStatus('error');
     }
   };
 
   const disconnectWebSocket = () => {
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000, 'Normal closure');
       wsRef.current = null;
     }
     stopHeartbeat();
@@ -295,6 +395,9 @@ export default function AlertsPage() {
   };
 
   const startHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
     heartbeatIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ op: 'ping' }));
@@ -314,7 +417,6 @@ export default function AlertsPage() {
     fetchAlerts();
     connectWebSocket();
     
-    // Refresh every 60 seconds
     const interval = setInterval(() => {
       if (connectionStatus === 'disconnected') {
         fetchAlerts();
@@ -428,6 +530,11 @@ export default function AlertsPage() {
                   {getConnectionIcon()}
                   <span className="capitalize">{connectionStatus}</span>
                 </span>
+                {isApiConnected && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                    ● API Connected
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -621,6 +728,12 @@ export default function AlertsPage() {
                   <span className="text-gray-500 dark:text-gray-400">Alerts Generated</span>
                   <span className="font-medium text-gray-900 dark:text-white">{alerts.length}</span>
                 </div>
+                {isApiConnected && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 dark:text-gray-400">API Status</span>
+                    <span className="font-medium text-green-600 dark:text-green-400">Connected</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

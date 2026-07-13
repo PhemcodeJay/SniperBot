@@ -5,7 +5,7 @@ import AppLayout from '@/components/AppLayout';
 import { 
   Shield, Save, AlertTriangle, RotateCcw, CheckCircle, 
   Info, Zap, TrendingDown, Settings, Lock, Unlock,
-  Clock, Database, Loader2, Wifi, WifiOff
+  Clock, Database, Loader2, Wifi, WifiOff, X
 } from 'lucide-react';
 
 interface RiskRules {
@@ -79,6 +79,7 @@ const DEFAULT_RULES: RiskRules = {
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
   kline: 'https://api.bybit.com/v5/market/kline',
+  positions: 'https://api.bybit.com/v5/position/list',
 };
 
 const BYBIT_WS = {
@@ -88,6 +89,13 @@ const BYBIT_WS = {
 // Supported symbols for monitoring
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
 
+// Helper to generate Bybit signature
+const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+  const crypto = require('crypto');
+  const paramStr = timestamp + apiSecret + recvWindow + params;
+  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+};
+
 export default function RiskRulesPage() {
   const [rules, setRules] = useState<RiskRules>(DEFAULT_RULES);
   const [saved, setSaved] = useState(false);
@@ -96,6 +104,9 @@ export default function RiskRulesPage() {
   const [activeTab, setActiveTab] = useState<'loss' | 'position' | 'stoploss' | 'advanced'>('loss');
   const [isLoading, setIsLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [error, setError] = useState<string | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [isApiConnected, setIsApiConnected] = useState(false);
   const [riskAssessment, setRiskAssessment] = useState<RiskAssessment>({
     currentExposure: 0,
     dailyPnL: 0,
@@ -114,6 +125,15 @@ export default function RiskRulesPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get API credentials
+  const getApiCredentials = () => {
+    return {
+      apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
+      apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
+      isTestnet: true,
+    };
+  };
 
   // Load saved rules from localStorage
   useEffect(() => {
@@ -138,8 +158,11 @@ export default function RiskRulesPage() {
       let correlatedCount = 0;
       const priceData: Record<string, number> = {};
 
-      // Fetch data for all symbols
-      const promises = SUPPORTED_SYMBOLS.map(async (symbol) => {
+      const { apiKey, apiSecret, isTestnet } = getApiCredentials();
+      const hasApiKeys = apiKey && apiSecret;
+
+      // Always fetch ticker data
+      const tickerPromises = SUPPORTED_SYMBOLS.map(async (symbol) => {
         try {
           const response = await fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`);
           const data = await response.json();
@@ -150,30 +173,95 @@ export default function RiskRulesPage() {
             const change24h = parseFloat(ticker.price24hPcnt) * 100;
             
             priceData[symbol] = price;
-            marketData[symbol] = ticker;
-            
-            // Simulate open positions based on price movements
-            const hasPosition = Math.abs(change24h) > 1.5 && Math.random() < 0.3;
-            if (hasPosition) {
-              openPositionsCount++;
-              const positionSize = 0.01 + Math.random() * 0.04;
-              const entryPrice = price * (1 + (Math.random() - 0.5) * 0.02);
-              const pnl = (price - entryPrice) * positionSize * 50000;
-              totalPnL += pnl;
-              totalExposure += positionSize * price * 5; // 5x leverage
-              
-              // Check correlation (same direction, similar price movement)
-              if (Math.abs(change24h) > 2) {
-                correlatedCount++;
-              }
-            }
+            setMarketData(prev => ({ ...prev, [symbol]: ticker }));
           }
         } catch (err) {
           console.error(`Failed to fetch ${symbol}:`, err);
         }
       });
 
-      await Promise.all(promises);
+      await Promise.all(tickerPromises);
+
+      // If API keys exist, fetch real positions
+      if (hasApiKeys) {
+        try {
+          const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+          const timestamp = Date.now().toString();
+          const recvWindow = '5000';
+          const params = '';
+          
+          const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+          
+          const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
+            method: 'GET',
+            headers: {
+              'X-BAPI-API-KEY': apiKey,
+              'X-BAPI-TIMESTAMP': timestamp,
+              'X-BAPI-SIGN': signature,
+              'X-BAPI-RECV-WINDOW': recvWindow,
+            },
+          });
+          
+          const positionsData = await positionsResponse.json();
+          
+          if (positionsData.retCode === 0 && positionsData.result?.list) {
+            positionsData.result.list.forEach((pos: any) => {
+              const size = parseFloat(pos.size);
+              if (size !== 0) {
+                openPositionsCount++;
+                const entryPrice = parseFloat(pos.avgPrice);
+                const markPrice = parseFloat(pos.markPrice);
+                const pnl = parseFloat(pos.unrealisedPnl || 0);
+                const positionValue = entryPrice * Math.abs(size);
+                
+                totalPnL += pnl;
+                totalExposure += positionValue * parseFloat(pos.leverage || 5) / 100000;
+                
+                // Check correlation (same direction, similar price movement)
+                if (Math.abs(parseFloat(pos.price24hPcnt) || 0) > 2) {
+                  correlatedCount++;
+                }
+              }
+            });
+            setIsApiConnected(true);
+          }
+        } catch (err) {
+          console.error('Failed to fetch positions:', err);
+          // Fallback to simulated positions
+          setIsApiConnected(false);
+        }
+      }
+
+      // If no real positions, simulate based on price movements
+      if (!hasApiKeys || openPositionsCount === 0) {
+        const simulatedPositions = SUPPORTED_SYMBOLS.filter(symbol => {
+          const ticker = marketData[symbol];
+          if (ticker) {
+            const change24h = parseFloat(ticker.price24hPcnt) * 100;
+            return Math.abs(change24h) > 1.5 && Math.random() < 0.3;
+          }
+          return false;
+        });
+
+        simulatedPositions.forEach(symbol => {
+          const ticker = marketData[symbol];
+          if (ticker) {
+            const price = parseFloat(ticker.lastPrice);
+            const change24h = parseFloat(ticker.price24hPcnt) * 100;
+            openPositionsCount++;
+            const positionSize = 0.01 + Math.random() * 0.04;
+            const entryPrice = price * (1 + (Math.random() - 0.5) * 0.02);
+            const pnl = (price - entryPrice) * positionSize * 50000;
+            totalPnL += pnl;
+            totalExposure += positionSize * price * 5 / 100000;
+            
+            if (Math.abs(change24h) > 2) {
+              correlatedCount++;
+            }
+          }
+        });
+        setIsApiConnected(false);
+      }
 
       // Calculate risk assessment
       const totalCapital = 100000; // Simulated capital
@@ -201,7 +289,6 @@ export default function RiskRulesPage() {
         dailyLossLimit: Math.round((rules.maxDailyLoss / 100) * totalCapital),
       });
 
-      setMarketData(prev => ({ ...prev, ...priceData }));
       setError(null);
     } catch (err) {
       console.error('Error fetching market data:', err);
@@ -223,6 +310,7 @@ export default function RiskRulesPage() {
         console.log('WebSocket connected');
         setConnectionStatus('connected');
         setError(null);
+        setReconnectAttempts(0);
         
         // Subscribe to ticker updates
         ws.send(JSON.stringify({
@@ -242,23 +330,31 @@ export default function RiskRulesPage() {
         }
       };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setConnectionStatus('error');
-        setError('WebSocket connection error');
+      ws.onerror = (event) => {
+        console.warn('WebSocket connection issue:', event);
+        if (connectionStatus !== 'error') {
+          setConnectionStatus('error');
+        }
       };
 
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
+      ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code, event.reason);
         setConnectionStatus('disconnected');
         stopHeartbeat();
+        
+        if (event.code !== 1000) {
+          setError('WebSocket disconnected. Reconnecting...');
+        }
         
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
         }
+        
+        const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
         reconnectTimeoutRef.current = setTimeout(() => {
+          setReconnectAttempts(prev => prev + 1);
           connectWebSocket();
-        }, 5000);
+        }, delay);
       };
     } catch (err) {
       console.error('Failed to connect WebSocket:', err);
@@ -269,7 +365,7 @@ export default function RiskRulesPage() {
 
   const disconnectWebSocket = () => {
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000, 'Normal closure');
       wsRef.current = null;
     }
     stopHeartbeat();
@@ -280,6 +376,9 @@ export default function RiskRulesPage() {
   };
 
   const startHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
     heartbeatIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ op: 'ping' }));
@@ -300,7 +399,6 @@ export default function RiskRulesPage() {
       const ticker = data.data;
       if (ticker && ticker.symbol) {
         setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
-        // Update risk assessment periodically on price changes
         fetchMarketDataAndAssessRisk();
       }
     } else if (data.op === 'pong') {
@@ -313,7 +411,6 @@ export default function RiskRulesPage() {
     fetchMarketDataAndAssessRisk();
     connectWebSocket();
     
-    // Refresh every 60 seconds
     const interval = setInterval(() => {
       if (connectionStatus === 'disconnected') {
         fetchMarketDataAndAssessRisk();
@@ -323,6 +420,10 @@ export default function RiskRulesPage() {
     return () => {
       disconnectWebSocket();
       clearInterval(interval);
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
     };
   }, []);
 
@@ -354,6 +455,7 @@ export default function RiskRulesPage() {
 
   const handleReconnect = () => {
     disconnectWebSocket();
+    setReconnectAttempts(0);
     setTimeout(connectWebSocket, 1000);
     fetchMarketDataAndAssessRisk();
   };
@@ -478,8 +580,17 @@ export default function RiskRulesPage() {
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">
                 Risk Rules
               </h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                 Define hard limits and protective mechanisms for capital preservation
+                <span className="flex items-center gap-1 text-xs">
+                  {getConnectionIcon()}
+                  <span className="capitalize">{connectionStatus}</span>
+                </span>
+                {isApiConnected && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                    ● API Connected
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -533,6 +644,20 @@ export default function RiskRulesPage() {
             </button>
           </div>
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-600 dark:text-red-400">
+            <AlertTriangle size={16} />
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-red-600 dark:text-red-400 hover:text-red-800"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Save Message */}
         {saveMessage && (

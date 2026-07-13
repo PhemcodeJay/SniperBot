@@ -25,7 +25,6 @@ const DEFAULT_CHANNELS: WsChannel[] = [
 const RECONNECT_OPTIONS = ['1s', '3s', '5s', '10s'];
 const PING_OPTIONS = ['10s', '20s', '30s'];
 
-// Real WebSocket connection manager
 class WSConnection {
   private ws: WebSocket | null = null;
   private url: string;
@@ -181,7 +180,6 @@ export default function WebSocketConfigPanel() {
     const reconnectMs = parseTimeToMs(reconnectDelay);
     const pingMs = parseTimeToMs(pingInterval);
     
-    // Disconnect existing connection
     if (wsConnectionRef.current) {
       wsConnectionRef.current.disconnect();
     }
@@ -195,7 +193,6 @@ export default function WebSocketConfigPanel() {
     
     connection.onMessage((data) => {
       setReceivedMessages(prev => prev + 1);
-      // Handle incoming messages
       if (data.topic) {
         console.log(`Received ${data.topic} data:`, data.data);
       }
@@ -214,7 +211,6 @@ export default function WebSocketConfigPanel() {
 
   const testConnection = () => {
     if (connectionStatus === 'connected' || connectionStatus === 'reconnecting') {
-      // If already connected, disconnect and reconnect
       disconnectWebSocket();
       setTimeout(() => connectWebSocket(), 500);
     } else {
@@ -233,7 +229,6 @@ export default function WebSocketConfigPanel() {
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
     
-    // If connected, update subscriptions
     if (wsConnectionRef.current && connectionStatus === 'connected') {
       const activeTopics = channels.filter(c => c.enabled).map(c => c.topic);
       wsConnectionRef.current.subscribe(activeTopics);

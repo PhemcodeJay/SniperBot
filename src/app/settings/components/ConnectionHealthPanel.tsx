@@ -84,7 +84,6 @@ async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: 
   
   try {
     if (endpoint.url.startsWith('wss://')) {
-      // For WebSocket, we just check if we can establish a connection
       return new Promise((resolve) => {
         const ws = new WebSocket(endpoint.url);
         const timeout = setTimeout(() => {
@@ -108,7 +107,6 @@ async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: 
         };
       });
     } else {
-      // For REST endpoints, make a request
       const response = await fetch(endpoint.url, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
@@ -119,7 +117,6 @@ async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: 
       
       if (response.ok) {
         const data = await response.json();
-        // Check if response is valid (Bybit returns retCode 0 for success)
         if (data.retCode === 0) {
           return { 
             status: latency < 300 ? 'online' : 'degraded', 
@@ -155,7 +152,6 @@ export default function ConnectionHealthPanel() {
           idx === i ? { ...e, status: result.status, latency: result.latency, lastChecked: now } : e
         )
       );
-      // Small delay between checks to avoid rate limiting
       await new Promise((r) => setTimeout(r, 200));
     }
 

@@ -1,9 +1,9 @@
-// SignalFeed.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Zap, TrendingUp, TrendingDown, Filter, Clock, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Zap, TrendingUp, TrendingDown, Filter, Clock, Loader2, RefreshCw } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
+import { toast } from 'sonner';
 
 interface Signal {
   id: string;
@@ -20,7 +20,23 @@ interface Signal {
   status: 'pending' | 'confirmed' | 'executed' | 'expired';
   generatedAt: string;
   indicators: string[];
+  entryPrice: number;
+  change24h: number;
+  volume: number;
+  price: number;
 }
+
+// Bybit API endpoints
+const BYBIT_API = {
+  spot: 'https://api.bybit.com/v5/market/tickers',
+  kline: 'https://api.bybit.com/v5/market/kline',
+};
+
+const BYBIT_WS = {
+  linear: 'wss://stream.bybit.com/v5/public/linear',
+};
+
+const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
 
 const CONFIDENCE_COLOR = (c: number) =>
   c >= 88
@@ -33,74 +49,232 @@ export default function SignalFeed() {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'executed'>('all');
   const [minConfidence, setMinConfidence] = useState(75);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting' | 'error'>('disconnected');
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // WebSocket refs
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Generate signal from real market data
+  const generateSignalFromData = (symbol: string, ticker: any): Signal | null => {
+    const price = parseFloat(ticker.lastPrice);
+    const change24h = parseFloat(ticker.price24hPcnt) * 100;
+    const volume = parseFloat(ticker.volume24h);
+    const high24h = parseFloat(ticker.highPrice24h);
+    const low24h = parseFloat(ticker.lowPrice24h);
+
+    // Only generate signal if there's significant movement
+    if (Math.abs(change24h) < 0.5) return null;
+
+    const isLong = change24h > 0;
+    const confidence = Math.min(95, 70 + Math.abs(change24h) * 2 + Math.min(volume / 1e8, 15));
+    const atr = (high24h - low24h) / 4;
+    
+    const entryPrice = price;
+    const stopLoss = isLong ? price - atr * 1.5 : price + atr * 1.5;
+    const takeProfit1 = isLong ? price + atr * 2.5 : price - atr * 2.5;
+    const riskReward = Math.abs((takeProfit1 - price) / (price - stopLoss));
+    
+    const statuses: Signal['status'][] = ['pending', 'confirmed', 'executed'];
+    const status = confidence > 80 ? 'confirmed' : statuses[Math.floor(Math.random() * 2)];
+    
+    const regime = Math.abs(change24h) > 3 ? 'trending' : Math.abs(change24h) > 1 ? 'ranging' : 'volatile';
+    const timeframe = Math.abs(change24h) > 2 ? '15m' : '5m';
+    
+    const rsiValue = Math.round(50 + change24h * 1.5);
+    const volumeSpike = Math.min(3, volume / 1e8 + 1);
+
+    return {
+      id: `sig-${symbol}-${Date.now()}`,
+      symbol,
+      direction: isLong ? 'long' : 'short',
+      confidence: Math.round(confidence),
+      entryZone: `${(price * 0.998).toFixed(2)} – ${(price * 1.002).toFixed(2)}`,
+      stopLoss: Math.round(stopLoss * 100) / 100,
+      takeProfit1: Math.round(takeProfit1 * 100) / 100,
+      riskReward: Math.round(riskReward * 10) / 10,
+      volumeSpike: Math.round(volumeSpike * 10) / 10,
+      regime,
+      timeframe: timeframe as '5m' | '15m',
+      status,
+      generatedAt: new Date().toLocaleTimeString(),
+      indicators: [
+        `${isLong ? 'EMA20↑' : 'EMA20↓'}`,
+        `RSI ${Math.min(95, Math.max(5, rsiValue))}`,
+        volumeSpike > 1.5 ? 'VWAP+' : 'BB mid',
+        `Vol×${volumeSpike.toFixed(1)}`,
+      ],
+      entryPrice: price,
+      change24h,
+      volume,
+      price,
+    };
+  };
+
+  // Fetch signals from market data
   const fetchSignals = async () => {
     try {
-      // Fetch real market data to generate signals
-      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
+      setIsRefreshing(true);
+      setError(null);
+      
+      const promises = SUPPORTED_SYMBOLS.map(symbol =>
+        fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`)
+          .then(r => r.json())
+          .catch(() => null)
+      );
+      
+      const results = await Promise.all(promises);
       const generatedSignals: Signal[] = [];
       
-      for (const symbol of symbols) {
-        const response = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`);
-        const data = await response.json();
-        
-        if (data.retCode === 0 && data.result?.list) {
-          const ticker = data.result.list[0];
-          const price = parseFloat(ticker.lastPrice);
-          const change = parseFloat(ticker.price24hPcnt) * 100;
-          const volume = parseFloat(ticker.volume24h);
-          
-          // Generate signals based on real market conditions
-          const isLong = change > 0;
-          const confidence = 70 + Math.abs(change) * 2 + Math.random() * 10;
-          const atr = price * 0.01;
-          
-          const entryPrice = isLong ? price * (1 + Math.random() * 0.002) : price * (1 - Math.random() * 0.002);
-          const stopLoss = isLong ? entryPrice * 0.985 : entryPrice * 1.015;
-          const takeProfit1 = isLong ? entryPrice * 1.025 : entryPrice * 0.975;
-          const riskReward = ((entryPrice - stopLoss) / (takeProfit1 - entryPrice)) * 2;
-          
-          const statuses: Signal['status'][] = ['pending', 'confirmed', 'executed', 'expired'];
-          const status = statuses[Math.floor(Math.random() * 3)];
-          
-          generatedSignals.push({
-            id: `sig-${symbol.toLowerCase()}-${Date.now()}`,
-            symbol,
-            direction: isLong ? 'long' : 'short',
-            confidence: Math.min(confidence, 95),
-            entryZone: `${(entryPrice * 0.998).toFixed(2)} – ${(entryPrice * 1.002).toFixed(2)}`,
-            stopLoss,
-            takeProfit1,
-            riskReward,
-            volumeSpike: 1.5 + Math.random() * 1.5,
-            regime: Math.abs(change) > 3 ? 'trending' : Math.abs(change) > 1 ? 'ranging' : 'volatile',
-            timeframe: Math.random() > 0.5 ? '5m' : '15m',
-            status,
-            generatedAt: new Date().toLocaleTimeString(),
-            indicators: [
-              `${isLong ? 'EMA20↑' : 'EMA20↓'}`,
-              `RSI ${Math.floor(40 + Math.random() * 40)}`,
-              Math.random() > 0.5 ? 'VWAP+' : 'BB mid',
-              `Vol×${(1.5 + Math.random() * 1.5).toFixed(1)}`,
-            ],
-          });
+      results.forEach((result: any) => {
+        if (result && result.retCode === 0 && result.result?.list?.length > 0) {
+          const ticker = result.result.list[0];
+          const signal = generateSignalFromData(ticker.symbol, ticker);
+          if (signal) {
+            generatedSignals.push(signal);
+          }
         }
-      }
+      });
       
       // Sort by confidence descending
       generatedSignals.sort((a, b) => b.confidence - a.confidence);
-      setSignals(generatedSignals);
+      
+      // Merge with existing signals, keeping only active ones
+      const existingActive = signals.filter(s => s.status === 'pending' || s.status === 'confirmed');
+      const combined = [...generatedSignals, ...existingActive];
+      const unique = Array.from(new Map(combined.map(s => [s.symbol, s])).values());
+      
+      setSignals(unique.slice(0, 50));
     } catch (error) {
       console.error('Failed to fetch signals:', error);
+      setError('Failed to fetch signals. Using cached data.');
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
+
+  // WebSocket connection for real-time updates
+  const connectWebSocket = () => {
+    try {
+      setConnectionStatus('connecting');
+      
+      const ws = new WebSocket(BYBIT_WS.linear);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setConnectionStatus('connected');
+        setReconnectAttempts(0);
+        setError(null);
+        
+        ws.send(JSON.stringify({
+          op: 'subscribe',
+          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
+        }));
+        
+        startHeartbeat();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.topic === 'tickers') {
+            const ticker = data.data;
+            if (ticker && ticker.symbol) {
+              const signal = generateSignalFromData(ticker.symbol, ticker);
+              if (signal) {
+                setSignals(prev => {
+                  const filtered = prev.filter(s => s.symbol !== ticker.symbol || s.status === 'executed');
+                  return [signal, ...filtered].slice(0, 50);
+                });
+              }
+            }
+          } else if (data.op === 'pong') {
+            // Heartbeat response - ignore
+          }
+        } catch (err) {
+          // Ignore parse errors
+        }
+      };
+
+      ws.onerror = (event) => {
+        console.warn('WebSocket error:', event);
+        // Don't set error state here - onclose handles reconnection
+      };
+
+      ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code);
+        setConnectionStatus('disconnected');
+        stopHeartbeat();
+        
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        
+        // Only attempt reconnect if not a normal closure
+        if (event.code !== 1000) {
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, delay);
+        }
+      };
+    } catch (err) {
+      console.error('Failed to connect WebSocket:', err);
+      setConnectionStatus('error');
+    }
+  };
+
+  const disconnectWebSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close(1000, 'Normal closure');
+      wsRef.current = null;
+    }
+    stopHeartbeat();
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  };
+
+  const startHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ op: 'ping' }));
+      }
+    }, 30000);
+  };
+
+  const stopHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
     }
   };
 
   useEffect(() => {
     fetchSignals();
-    const interval = setInterval(fetchSignals, 30000);
-    return () => clearInterval(interval);
+    connectWebSocket();
+    
+    const interval = setInterval(() => {
+      if (connectionStatus === 'disconnected') {
+        fetchSignals();
+      }
+    }, 60000);
+    
+    return () => {
+      clearInterval(interval);
+      disconnectWebSocket();
+    };
   }, []);
 
   const filtered = signals.filter((s) => {
@@ -111,6 +285,15 @@ export default function SignalFeed() {
   });
 
   const liveCount = signals.filter((s) => s.status === 'pending' || s.status === 'confirmed').length;
+
+  const getConnectionIcon = () => {
+    switch (connectionStatus) {
+      case 'connected': return <span className="text-green-500">●</span>;
+      case 'connecting': return <Loader2 size={12} className="animate-spin text-yellow-500" />;
+      case 'error': return <span className="text-red-500">●</span>;
+      default: return <span className="text-gray-400">●</span>;
+    }
+  };
 
   if (isLoading) {
     return (
@@ -133,8 +316,20 @@ export default function SignalFeed() {
           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-info-subtle text-info border border-info/20">
             {liveCount} live
           </span>
+          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            {getConnectionIcon()}
+            {connectionStatus}
+          </span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={fetchSignals}
+            disabled={isRefreshing}
+            className="p-1 rounded hover:bg-muted transition-colors disabled:opacity-50"
+            title="Refresh signals"
+          >
+            <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
+          </button>
           <Filter size={12} className="text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Min:</span>
           <span className="text-xs font-semibold font-tabular text-primary w-7">
@@ -147,11 +342,18 @@ export default function SignalFeed() {
             step={1}
             value={minConfidence}
             onChange={(e) => setMinConfidence(Number(e.target.value))}
-            className="w-16"
+            className="w-16 accent-blue-600 dark:accent-blue-400"
             aria-label="Minimum confidence filter"
           />
         </div>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="mx-4 mt-2 p-2 rounded-md bg-negative-subtle text-negative text-xs border border-negative/20">
+          {error}
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex gap-1 px-4 py-2.5 border-b border-border shrink-0">
@@ -181,7 +383,7 @@ export default function SignalFeed() {
               No signals match current filters
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Lower the confidence threshold or change the status filter
+              {connectionStatus === 'connected' ? 'Analyzing market data...' : 'Waiting for connection...'}
             </p>
           </div>
         ) : (
@@ -206,6 +408,9 @@ export default function SignalFeed() {
                   <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
                     {signal.timeframe}
                   </span>
+                  <span className={`text-[10px] ${signal.change24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {signal.change24h >= 0 ? '+' : ''}{signal.change24h.toFixed(1)}%
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span
@@ -220,18 +425,18 @@ export default function SignalFeed() {
               <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[10px] font-mono mb-2">
                 <div>
                   <span className="text-muted-foreground">Entry: </span>
-                  <span className="text-foreground font-tabular">{signal.entryZone}</span>
+                  <span className="text-foreground font-tabular">${signal.entryPrice.toFixed(2)}</span>
                 </div>
                 <div>
                   <span className="text-negative">SL: </span>
                   <span className="text-foreground font-tabular">
-                    {signal.stopLoss.toLocaleString()}
+                    ${signal.stopLoss.toLocaleString()}
                   </span>
                 </div>
                 <div>
                   <span className="text-positive">TP1: </span>
                   <span className="text-foreground font-tabular">
-                    {signal.takeProfit1.toLocaleString()}
+                    ${signal.takeProfit1.toLocaleString()}
                   </span>
                 </div>
                 <div>

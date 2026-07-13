@@ -46,12 +46,10 @@ interface Indicator {
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
   kline: 'https://api.bybit.com/v5/market/kline',
-  orderbook: 'https://api.bybit.com/v5/market/orderbook',
 };
 
 // WebSocket connection for live data
 const BYBIT_WS = {
-  spot: 'wss://stream.bybit.com/v5/public/spot',
   linear: 'wss://stream.bybit.com/v5/public/linear',
 };
 
@@ -62,10 +60,26 @@ const SUPPORTED_SYMBOLS = [
   'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
 ];
 
+// Default indicators
+const DEFAULT_INDICATORS: Indicator[] = [
+  { id: 'rsi', label: 'RSI (14)', enabled: true, category: 'momentum' },
+  { id: 'macd', label: 'MACD (12,26,9)', enabled: true, category: 'momentum' },
+  { id: 'bb', label: 'Bollinger Bands (20,2)', enabled: true, category: 'volatility' },
+  { id: 'vwap', label: 'VWAP', enabled: true, category: 'volume' },
+  { id: 'ema9', label: 'EMA 9', enabled: true, category: 'trend' },
+  { id: 'ema20', label: 'EMA 20', enabled: true, category: 'trend' },
+  { id: 'ma50', label: 'MA 50', enabled: true, category: 'trend' },
+  { id: 'ma200', label: 'MA 200', enabled: false, category: 'trend' },
+  { id: 'stochrsi', label: 'Stochastic RSI', enabled: true, category: 'momentum' },
+  { id: 'atr', label: 'ATR (14)', enabled: true, category: 'volatility' },
+];
+
+type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
 export default function SignalEnginePage() {
   // State
   const [signals, setSignals] = useState<Signal[]>([]);
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
+  const [indicators, setIndicators] = useState<Indicator[]>(DEFAULT_INDICATORS);
   const [filterStatus, setFilterStatus] = useState<'all' | 'live' | 'pending' | 'rejected' | 'executed'>('all');
   const [filterSymbol, setFilterSymbol] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -82,6 +96,8 @@ export default function SignalEnginePage() {
     avgConfidence: 0,
   });
   const [marketData, setMarketData] = useState<Record<string, any>>({});
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -105,13 +121,6 @@ export default function SignalEnginePage() {
           if (data.retCode === 0 && data.result?.list?.length > 0) {
             const ticker = data.result.list[0];
             marketDataMap[symbol] = ticker;
-            
-            // Calculate technical indicators from ticker data
-            const price = parseFloat(ticker.lastPrice);
-            const change24h = parseFloat(ticker.price24hPcnt) * 100;
-            const volume24h = parseFloat(ticker.volume24h);
-            const high24h = parseFloat(ticker.highPrice24h);
-            const low24h = parseFloat(ticker.lowPrice24h);
             
             // Generate signal based on real market conditions
             const signal = generateSignalFromData(symbol, ticker);
@@ -138,6 +147,7 @@ export default function SignalEnginePage() {
       ).sort((a, b) => b.confidence - a.confidence);
       
       setSignals(uniqueSignals.slice(0, 50));
+      setLastUpdate(new Date());
       setError(null);
     } catch (err) {
       console.error('Error fetching market data:', err);
@@ -154,6 +164,9 @@ export default function SignalEnginePage() {
     const volume24h = parseFloat(ticker.volume24h);
     const high24h = parseFloat(ticker.highPrice24h);
     const low24h = parseFloat(ticker.lowPrice24h);
+    
+    // Only generate signal if there's significant movement
+    if (Math.abs(change24h) < 0.5) return null;
     
     // Calculate RSI approximation from price change
     const rsi = 50 + (change24h * 2);
@@ -197,6 +210,9 @@ export default function SignalEnginePage() {
     const source = confidence > 80 ? 'hybrid' : 
                    confidence > 70 ? 'technical' : 'ml';
     
+    // Determine status
+    const status = confidence > 80 ? 'live' : confidence > 70 ? 'pending' : 'rejected';
+    
     return {
       id: `sig-${symbol}-${Date.now()}`,
       symbol,
@@ -212,12 +228,13 @@ export default function SignalEnginePage() {
       rsi: Math.round(clampedRsi),
       macdSignal: isLong ? 'bullish' : isShort ? 'bearish' : 'neutral',
       bbPosition: isLong ? 'lower' : isShort ? 'upper' : 'middle',
-      timeframe,
-      status: confidence > 75 ? 'live' : 'pending',
+      timeframe: timeframe as '5m' | '15m',
+      status: status as 'live' | 'pending' | 'rejected' | 'executed',
+      rejectionReason: status === 'rejected' ? 'Confidence below threshold' : undefined,
       generatedAt: new Date().toLocaleTimeString(),
       timestamp: Date.now(),
       volume: volume24h,
-      signalSource: source,
+      signalSource: source as 'ml' | 'technical' | 'hybrid',
       change24h: change24h,
       price24hHigh: high24h,
       price24hLow: low24h,
@@ -236,6 +253,7 @@ export default function SignalEnginePage() {
         console.log('WebSocket connected');
         setConnectionStatus('connected');
         setError(null);
+        setReconnectAttempts(0);
         
         // Subscribe to ticker updates for all symbols
         const subscription = {
@@ -253,28 +271,35 @@ export default function SignalEnginePage() {
           const data = JSON.parse(event.data);
           handleWebSocketMessage(data);
         } catch (err) {
-          // Ignore parse errors
+          // Ignore parse errors for non-JSON messages
         }
       };
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setConnectionStatus('error');
-        setError('WebSocket connection error');
+      ws.onerror = (event) => {
+        // Don't set error state here - onclose will handle reconnection
+        console.warn('WebSocket connection issue:', event);
       };
 
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
+      ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code, event.reason);
         setConnectionStatus('disconnected');
         stopHeartbeat();
         
-        // Attempt to reconnect after delay
+        // Don't show error for normal closures
+        if (event.code !== 1000) {
+          setError('WebSocket disconnected. Reconnecting...');
+        }
+        
+        // Attempt to reconnect with exponential backoff
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
         }
+        
+        const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
         reconnectTimeoutRef.current = setTimeout(() => {
+          setReconnectAttempts(prev => prev + 1);
           connectWebSocket();
-        }, 5000);
+        }, delay);
       };
     } catch (err) {
       console.error('Failed to connect WebSocket:', err);
@@ -285,7 +310,7 @@ export default function SignalEnginePage() {
 
   const disconnectWebSocket = () => {
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000, 'Normal closure');
       wsRef.current = null;
     }
     stopHeartbeat();
@@ -300,6 +325,9 @@ export default function SignalEnginePage() {
   };
 
   const startHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
     heartbeatIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ op: 'ping' }));
@@ -320,12 +348,14 @@ export default function SignalEnginePage() {
       // Update market data and generate signals
       const ticker = data.data;
       if (ticker && ticker.symbol) {
+        setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
         const signal = generateSignalFromData(ticker.symbol, ticker);
         if (signal) {
           setSignals(prev => {
             const filtered = prev.filter(s => s.symbol !== ticker.symbol || s.status === 'executed');
             return [signal, ...filtered].slice(0, 50);
           });
+          setLastUpdate(new Date());
         }
       }
     } else if (data.op === 'pong') {
@@ -375,7 +405,9 @@ export default function SignalEnginePage() {
       
       // If WebSocket is disconnected, try to reconnect
       if (connectionStatus === 'disconnected') {
-        connectWebSocket();
+        disconnectWebSocket();
+        setReconnectAttempts(0);
+        setTimeout(connectWebSocket, 1000);
       }
     } catch (err) {
       setError('Failed to scan market. Please try again.');
@@ -407,6 +439,7 @@ export default function SignalEnginePage() {
   // Reconnect WebSocket manually
   const handleReconnect = () => {
     disconnectWebSocket();
+    setReconnectAttempts(0);
     setTimeout(connectWebSocket, 1000);
   };
 
@@ -499,32 +532,33 @@ export default function SignalEnginePage() {
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">
                 Signal Engine
               </h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                 AI-powered signal generation from live Bybit data
+                <span className="flex items-center gap-1 text-xs">
+                  {getConnectionIcon()}
+                  <span className={`capitalize ${
+                    connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
+                    connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
+                    'text-gray-500 dark:text-gray-400'
+                  }`}>
+                    {getConnectionText()}
+                  </span>
+                </span>
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Connection Status */}
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg text-xs">
-              {getConnectionIcon()}
-              <span className={`font-medium ${
-                connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
-                connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
-                'text-gray-500 dark:text-gray-400'
-              }`}>
-                {getConnectionText()}
-              </span>
-              {connectionStatus === 'error' && (
-                <button
-                  onClick={handleReconnect}
-                  className="ml-1 text-blue-600 dark:text-blue-400 hover:underline"
-                >
-                  Reconnect
-                </button>
-              )}
-            </div>
-
+            {connectionStatus === 'error' && (
+              <button
+                onClick={handleReconnect}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Reconnect
+              </button>
+            )}
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              Updated: {lastUpdate.toLocaleTimeString()}
+            </span>
             <button
               onClick={handleRescan}
               disabled={isScanning}

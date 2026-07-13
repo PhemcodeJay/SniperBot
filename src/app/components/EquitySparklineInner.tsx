@@ -55,7 +55,7 @@ export default function EquitySparklineInner() {
         const change24h = parseFloat(ticker.price24hPcnt) * 100;
         
         // Generate realistic equity curve based on current price
-        const baseEquity = 24190;
+        const baseEquity = 100;
         const generatedData: EquityPoint[] = [];
         const now = new Date();
         

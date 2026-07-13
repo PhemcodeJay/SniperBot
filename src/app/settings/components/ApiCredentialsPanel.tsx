@@ -24,6 +24,13 @@ const BYBIT_API = {
   live: 'https://api.bybit.com',
 };
 
+// Helper to generate Bybit signature
+const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+  const crypto = require('crypto');
+  const paramStr = timestamp + apiSecret + recvWindow + params;
+  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+};
+
 export default function ApiCredentialsPanel() {
   const [activeMode, setActiveMode] = useState<TradingMode>('paper');
   const [showSecret, setShowSecret] = useState<Record<TradingMode, boolean>>({ paper: false, live: false });
@@ -41,13 +48,6 @@ export default function ApiCredentialsPanel() {
     setTestResult((prev) => ({ ...prev, [mode]: { status: 'idle', message: '' } }));
   };
 
-  // Generate signature for Bybit API
-  const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-    const crypto = require('crypto');
-    const paramStr = timestamp + apiSecret + recvWindow + params;
-    return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-  };
-
   const handleTest = async (mode: TradingMode) => {
     const creds = credentials[mode];
     if (!creds.apiKey || !creds.apiSecret) {
@@ -63,7 +63,6 @@ export default function ApiCredentialsPanel() {
       const recvWindow = '5000';
       const params = '';
 
-      // Generate signature for wallet balance endpoint
       const signature = generateSignature(creds.apiSecret, timestamp, recvWindow, params);
 
       const response = await fetch(`${BYBIT_API[mode]}/v5/account/wallet-balance`, {

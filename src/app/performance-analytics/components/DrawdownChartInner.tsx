@@ -1,4 +1,3 @@
-// DrawdownChartInner.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -12,12 +11,27 @@ import {
   CartesianGrid,
   ReferenceLine,
   Loader2,
+  AlertCircle,
 } from 'recharts';
 
 interface DrawdownPoint {
   time: string;
   dd: number;
 }
+
+interface DrawdownStats {
+  maxDD: number;
+  currentDD: number;
+  recoveryTime: number;
+  limitUsed: number;
+  peakPrice: number;
+  troughPrice: number;
+}
+
+// Bybit API endpoints
+const BYBIT_API = {
+  kline: 'https://api.bybit.com/v5/market/kline',
+};
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -38,33 +52,73 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 export default function DrawdownChartInner() {
   const [data, setData] = useState<DrawdownPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [stats, setStats] = useState({ maxDD: 0, recovery: 0, limitUsed: 0 });
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<DrawdownStats>({
+    maxDD: 0,
+    currentDD: 0,
+    recoveryTime: 0,
+    limitUsed: 0,
+    peakPrice: 0,
+    troughPrice: 0,
+  });
 
   const fetchData = async () => {
     try {
-      // Fetch real price data to generate drawdown curve
-      const response = await fetch('https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=60&limit=48');
+      setIsLoading(true);
+      setError(null);
+
+      // Fetch real kline data for BTCUSDT
+      const response = await fetch(`${BYBIT_API.kline}?category=linear&symbol=BTCUSDT&interval=60&limit=72`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch kline data');
+      }
+      
       const result = await response.json();
       
       if (result.retCode === 0 && result.result?.list) {
         const klines = result.result.list;
-        const basePrice = parseFloat(klines[0][1]); // Open price
+        
+        // Calculate drawdown from real price data
+        let peak = 0;
         let maxDrawdown = 0;
-        let peak = basePrice;
+        let currentDrawdown = 0;
+        let peakPrice = 0;
+        let troughPrice = 0;
+        let peakTime = 0;
+        let troughTime = 0;
         
         const drawdownData: DrawdownPoint[] = klines.map((k: any, i: number) => {
           const close = parseFloat(k[4]);
-          const time = new Date(parseInt(k[0])).toLocaleString('en-US', { 
+          const timestamp = parseInt(k[0]);
+          const time = new Date(timestamp).toLocaleString('en-US', { 
             month: 'short', 
             day: 'numeric',
             hour: '2-digit',
             minute: '2-digit'
           });
           
+          // Track peak
+          if (close > peak) {
+            peak = close;
+            peakPrice = close;
+            peakTime = timestamp;
+          }
+          
           // Calculate drawdown from peak
-          if (close > peak) peak = close;
-          const drawdown = ((close - peak) / peak) * 100;
-          if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+          const drawdown = peak > 0 ? ((close - peak) / peak) * 100 : 0;
+          
+          // Track max drawdown
+          if (drawdown < maxDrawdown) {
+            maxDrawdown = drawdown;
+            troughPrice = close;
+            troughTime = timestamp;
+          }
+          
+          // Track current drawdown
+          if (i === klines.length - 1) {
+            currentDrawdown = drawdown;
+          }
           
           return {
             time,
@@ -72,15 +126,33 @@ export default function DrawdownChartInner() {
           };
         });
         
+        // Calculate recovery time (if recovered)
+        const recoveryTime = maxDrawdown < 0 && peakTime > 0 && troughTime > 0
+          ? Math.round((peakTime - troughTime) / 3600000)
+          : 0;
+        
+        // Calculate limit used based on max drawdown vs 15% limit
+        const limitUsed = maxDrawdown < 0 
+          ? Math.round((Math.abs(maxDrawdown) / 15) * 100 * 10) / 10
+          : 0;
+        
         setData(drawdownData);
         setStats({
           maxDD: Math.round(Math.abs(maxDrawdown) * 100) / 100,
-          recovery: Math.round((Math.random() * 4 + 4) * 10) / 10,
-          limitUsed: Math.round((Math.abs(maxDrawdown) / 15) * 100 * 10) / 10,
+          currentDD: Math.round(currentDrawdown * 100) / 100,
+          recoveryTime: Math.max(0, recoveryTime),
+          limitUsed: Math.min(100, limitUsed),
+          peakPrice: peakPrice,
+          troughPrice: troughPrice,
         });
+        
+        setError(null);
+      } else {
+        throw new Error(result.retMsg || 'Failed to fetch kline data');
       }
     } catch (error) {
       console.error('Failed to fetch drawdown data:', error);
+      setError('Failed to load drawdown data');
     } finally {
       setIsLoading(false);
     }
@@ -103,6 +175,33 @@ export default function DrawdownChartInner() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="card-surface p-5">
+        <div className="flex items-center gap-3 text-negative">
+          <AlertCircle size={20} />
+          <span className="text-sm">{error}</span>
+          <button
+            onClick={fetchData}
+            className="ml-auto text-xs font-medium text-primary hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (data.length === 0) {
+    return (
+      <div className="card-surface p-5">
+        <div className="flex items-center justify-center py-12">
+          <span className="text-sm text-muted-foreground">No drawdown data available</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="card-surface p-5">
       <div className="flex items-center justify-between mb-4">
@@ -120,8 +219,10 @@ export default function DrawdownChartInner() {
             <p className="font-bold text-negative font-tabular">-{stats.maxDD}%</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] text-muted-foreground">Recovery</p>
-            <p className="font-bold text-positive font-tabular">{stats.recovery}h</p>
+            <p className="text-[10px] text-muted-foreground">Current DD</p>
+            <p className={`font-bold font-tabular ${stats.currentDD < -1 ? 'text-negative' : stats.currentDD < 0 ? 'text-warning' : 'text-positive'}`}>
+              {stats.currentDD.toFixed(1)}%
+            </p>
           </div>
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Limit Used</p>
@@ -194,6 +295,23 @@ export default function DrawdownChartInner() {
           />
         </AreaChart>
       </ResponsiveContainer>
+
+      <div className="mt-3 pt-3 border-t border-border">
+        <div className="flex justify-between text-[10px] text-muted-foreground">
+          <span>
+            Peak: <span className="text-foreground font-mono">${stats.peakPrice.toFixed(2)}</span>
+          </span>
+          <span>
+            Trough: <span className="text-foreground font-mono">${stats.troughPrice.toFixed(2)}</span>
+          </span>
+          <span>
+            Recovery: <span className="text-foreground font-mono">{stats.recoveryTime > 0 ? `${stats.recoveryTime}h` : 'N/A'}</span>
+          </span>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          <span className="text-muted-foreground">Data source:</span> Bybit BTCUSDT 1h klines
+        </p>
+      </div>
     </div>
   );
 }

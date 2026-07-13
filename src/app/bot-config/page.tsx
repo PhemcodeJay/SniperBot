@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { 
   Bot, Save, RotateCcw, ChevronDown, ChevronUp, Info, AlertCircle, CheckCircle, Clock,
-  Wifi, WifiOff, Loader2, RefreshCw
+  Wifi, WifiOff, Loader2, RefreshCw, X
 } from 'lucide-react';
 
 interface ConfigSection {
@@ -49,6 +49,7 @@ interface MarketStatus {
   avgVolatility: number;
   activePositions: number;
   connectionStatus: 'connected' | 'disconnected' | 'connecting' | 'error';
+  lastUpdate: Date;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -79,6 +80,7 @@ const DEFAULT_CONFIG: BotConfig = {
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
   kline: 'https://api.bybit.com/v5/market/kline',
+  positions: 'https://api.bybit.com/v5/position/list',
 };
 
 const BYBIT_WS = {
@@ -86,6 +88,13 @@ const BYBIT_WS = {
 };
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+
+// Helper to generate Bybit signature
+const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+  const crypto = require('crypto');
+  const paramStr = timestamp + apiSecret + recvWindow + params;
+  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+};
 
 export default function BotConfigPage() {
   const [sections, setSections] = useState<ConfigSection[]>([
@@ -101,17 +110,31 @@ export default function BotConfigPage() {
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [isApiConnected, setIsApiConnected] = useState(false);
   const [marketStatus, setMarketStatus] = useState<MarketStatus>({
     symbols: 0,
     volume24h: 0,
     avgVolatility: 0,
     activePositions: 0,
     connectionStatus: 'connecting',
+    lastUpdate: new Date(),
   });
 
   // WebSocket refs
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get API credentials
+  const getApiCredentials = () => {
+    return {
+      apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
+      apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
+      isTestnet: true,
+    };
+  };
 
   // Track changes
   useEffect(() => {
@@ -134,19 +157,25 @@ export default function BotConfigPage() {
   // Fetch market data and update status
   const fetchMarketStatus = async () => {
     try {
-      const promises = SUPPORTED_SYMBOLS.map(symbol =>
+      const { apiKey, apiSecret, isTestnet } = getApiCredentials();
+      const hasApiKeys = apiKey && apiSecret;
+      
+      // Always fetch ticker data
+      const tickerPromises = SUPPORTED_SYMBOLS.map(symbol =>
         fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`)
           .then(r => r.json())
+          .catch(() => null)
       );
       
-      const results = await Promise.all(promises);
+      const tickerResults = await Promise.all(tickerPromises);
       
       let totalVolume = 0;
       let totalVolatility = 0;
       let validCount = 0;
+      let activePositions = 0;
       
-      results.forEach((result: any) => {
-        if (result.retCode === 0 && result.result?.list?.length > 0) {
+      tickerResults.forEach((result: any) => {
+        if (result && result.retCode === 0 && result.result?.list?.length > 0) {
           const ticker = result.result.list[0];
           totalVolume += parseFloat(ticker.volume24h) || 0;
           totalVolatility += Math.abs(parseFloat(ticker.price24hPcnt) || 0);
@@ -154,15 +183,56 @@ export default function BotConfigPage() {
         }
       });
       
+      // If API keys exist, fetch positions
+      if (hasApiKeys) {
+        const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+        const timestamp = Date.now().toString();
+        const recvWindow = '5000';
+        const params = '';
+        
+        const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+        
+        const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
+          method: 'GET',
+          headers: {
+            'X-BAPI-API-KEY': apiKey,
+            'X-BAPI-TIMESTAMP': timestamp,
+            'X-BAPI-SIGN': signature,
+            'X-BAPI-RECV-WINDOW': recvWindow,
+          },
+        });
+        
+        const positionsData = await positionsResponse.json();
+        
+        if (positionsData.retCode === 0 && positionsData.result?.list) {
+          positionsData.result.list.forEach((pos: any) => {
+            const size = parseFloat(pos.size);
+            if (size !== 0) {
+              activePositions++;
+            }
+          });
+        }
+        
+        setIsApiConnected(true);
+      } else {
+        setIsApiConnected(false);
+        // Simulate active positions for demo
+        activePositions = Math.floor(Math.random() * 3) + 1;
+      }
+      
       setMarketStatus({
         symbols: validCount,
         volume24h: totalVolume,
         avgVolatility: validCount > 0 ? (totalVolatility / validCount) * 100 : 0,
-        activePositions: Math.floor(Math.random() * 3) + 1,
+        activePositions: activePositions,
         connectionStatus: marketStatus.connectionStatus,
+        lastUpdate: new Date(),
       });
+      
+      setError(null);
     } catch (error) {
       console.error('Failed to fetch market status:', error);
+      setError('Failed to fetch market data. Using cached data.');
     } finally {
       setIsLoading(false);
     }
@@ -177,11 +247,17 @@ export default function BotConfigPage() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        console.log('WebSocket connected');
         setMarketStatus(prev => ({ ...prev, connectionStatus: 'connected' }));
+        setReconnectAttempts(0);
+        setError(null);
+        
         ws.send(JSON.stringify({
           op: 'subscribe',
           args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
         }));
+        
+        startHeartbeat();
       };
 
       ws.onmessage = (event) => {
@@ -190,33 +266,70 @@ export default function BotConfigPage() {
           if (data.topic === 'tickers') {
             // Update market status on price changes
             fetchMarketStatus();
+          } else if (data.op === 'pong') {
+            // Heartbeat response - ignore
           }
         } catch (err) {
           // Ignore
         }
       };
 
-      ws.onerror = () => {
-        setMarketStatus(prev => ({ ...prev, connectionStatus: 'error' }));
+      ws.onerror = (event) => {
+        console.warn('WebSocket error:', event);
+        // Don't set error state here - onclose handles reconnection
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code);
         setMarketStatus(prev => ({ ...prev, connectionStatus: 'disconnected' }));
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
+        stopHeartbeat();
+        
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        
+        // Only attempt reconnect if not a normal closure
+        if (event.code !== 1000) {
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            connectWebSocket();
+          }, delay);
+        }
       };
     } catch (err) {
+      console.error('Failed to connect WebSocket:', err);
       setMarketStatus(prev => ({ ...prev, connectionStatus: 'error' }));
     }
   };
 
   const disconnectWebSocket = () => {
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000, 'Normal closure');
       wsRef.current = null;
     }
+    stopHeartbeat();
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+  };
+
+  const startHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ op: 'ping' }));
+      }
+    }, 30000);
+  };
+
+  const stopHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
     }
   };
 
@@ -235,6 +348,10 @@ export default function BotConfigPage() {
     return () => {
       clearInterval(interval);
       disconnectWebSocket();
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
     };
   }, []);
 
@@ -270,6 +387,13 @@ export default function BotConfigPage() {
       setSaveMessage({ type: 'success', text: 'Configuration reset to defaults' });
       setTimeout(() => setSaveMessage(null), 2000);
     }
+  };
+
+  const handleReconnect = () => {
+    disconnectWebSocket();
+    setReconnectAttempts(0);
+    setTimeout(connectWebSocket, 1000);
+    fetchMarketStatus();
   };
 
   const SectionHeader = ({ id, label }: { id: string; label: string }) => {
@@ -368,6 +492,11 @@ export default function BotConfigPage() {
                   {getConnectionIcon()}
                   <span className="capitalize">{marketStatus.connectionStatus}</span>
                 </span>
+                {isApiConnected && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+                    ● API Connected
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -402,6 +531,36 @@ export default function BotConfigPage() {
           </div>
         </div>
 
+        {/* Error Message */}
+        {error && (
+          <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-600 dark:text-red-400">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="ml-auto text-red-600 dark:text-red-400 hover:text-red-800"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Save Message */}
+        {saveMessage && (
+          <div className={`p-3 rounded-lg flex items-center gap-2 ${
+            saveMessage.type === 'success' 
+              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400'
+              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
+          }`}>
+            {saveMessage.type === 'success' ? (
+              <CheckCircle size={16} />
+            ) : (
+              <AlertCircle size={16} />
+            )}
+            <span className="text-sm">{saveMessage.text}</span>
+          </div>
+        )}
+
         {/* Market Status Banner */}
         <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50">
           <div className="flex items-center gap-2">
@@ -421,24 +580,19 @@ export default function BotConfigPage() {
             <span className="text-gray-600 dark:text-gray-300">
               Active Positions: <span className="font-semibold text-gray-900 dark:text-white">{marketStatus.activePositions}</span>
             </span>
+            <span className="text-gray-400">
+              Updated: {marketStatus.lastUpdate.toLocaleTimeString()}
+            </span>
+            {marketStatus.connectionStatus === 'error' && (
+              <button
+                onClick={handleReconnect}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Reconnect
+              </button>
+            )}
           </div>
         </div>
-
-        {/* Save Message */}
-        {saveMessage && (
-          <div className={`p-3 rounded-lg flex items-center gap-2 ${
-            saveMessage.type === 'success' 
-              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400'
-              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
-          }`}>
-            {saveMessage.type === 'success' ? (
-              <CheckCircle size={16} />
-            ) : (
-              <AlertCircle size={16} />
-            )}
-            <span className="text-sm">{saveMessage.text}</span>
-          </div>
-        )}
 
         {/* Mode Toggle */}
         <div className="flex flex-wrap items-center gap-3 p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50">

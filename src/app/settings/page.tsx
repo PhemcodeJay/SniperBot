@@ -91,6 +91,7 @@ const ApiCredentialsPanel = () => {
   const [copied, setCopied] = useState(false);
   const [balance, setBalance] = useState<string>('');
   const [uid, setUid] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
 
   const testConnection = async () => {
     if (!credentials.apiKey || !credentials.apiSecret) {
@@ -102,6 +103,7 @@ const ApiCredentialsPanel = () => {
     setIsTesting(true);
     setTestStatus('idle');
     setTestMessage('');
+    setError(null);
 
     const baseUrl = credentials.isTestnet ? BYBIT_API.testnet : BYBIT_API.mainnet;
     const timestamp = Date.now().toString();
@@ -132,12 +134,14 @@ const ApiCredentialsPanel = () => {
         setUid(accountUid);
         setTestStatus('success');
         setTestMessage('Connection verified successfully!');
+        setError(null);
       } else {
         throw new Error(data.retMsg || 'Invalid credentials or API error');
       }
     } catch (error: any) {
       setTestStatus('error');
       setTestMessage(error.message || 'Failed to connect to Bybit API');
+      setError(error.message);
     } finally {
       setIsTesting(false);
     }
@@ -146,15 +150,16 @@ const ApiCredentialsPanel = () => {
   const handleSave = async () => {
     if (!credentials.apiKey || !credentials.apiSecret) {
       setSaveStatus('error');
+      setError('API Key and Secret are required');
       setTimeout(() => setSaveStatus('idle'), 3000);
       return;
     }
 
     setIsSaving(true);
     setSaveStatus('idle');
+    setError(null);
     
     try {
-      // Save to localStorage for demo purposes
       localStorage.setItem('bybit_credentials', JSON.stringify({
         apiKey: credentials.apiKey,
         apiSecret: credentials.apiSecret,
@@ -165,6 +170,7 @@ const ApiCredentialsPanel = () => {
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
       setSaveStatus('error');
+      setError('Failed to save credentials');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } finally {
       setIsSaving(false);
@@ -177,7 +183,6 @@ const ApiCredentialsPanel = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Load saved credentials on mount
   useEffect(() => {
     const saved = localStorage.getItem('bybit_credentials');
     if (saved) {
@@ -515,6 +520,7 @@ const WebSocketConfigPanel = () => {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [logs, setLogs] = useState<string[]>([]);
   const [messageCount, setMessageCount] = useState(0);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -523,13 +529,14 @@ const WebSocketConfigPanel = () => {
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-20));
   };
 
-  const connect = async () => {
+  const connect = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       disconnect();
       return;
     }
 
     setStatus('connecting');
+    setReconnectAttempts(0);
     addLog('Connecting to WebSocket...');
 
     try {
@@ -539,16 +546,15 @@ const WebSocketConfigPanel = () => {
       ws.onopen = () => {
         setStatus('connected');
         setMessageCount(0);
+        setReconnectAttempts(0);
         addLog('✅ Connected successfully');
         
-        // Subscribe to ticker updates
         ws.send(JSON.stringify({
           op: 'subscribe',
           args: ['tickers.BTCUSDT', 'tickers.ETHUSDT', 'tickers.SOLUSDT']
         }));
         addLog('📡 Subscribed to ticker updates');
 
-        // Start heartbeat
         if (heartbeatIntervalRef.current) {
           clearInterval(heartbeatIntervalRef.current);
         }
@@ -575,23 +581,28 @@ const WebSocketConfigPanel = () => {
       };
 
       ws.onerror = (error) => {
-        setStatus('error');
-        addLog('❌ WebSocket error occurred');
-        console.error('WebSocket error:', error);
+        // Don't set error state here - onclose handles reconnection
+        console.warn('WebSocket error:', error);
+        addLog('⚠️ WebSocket error occurred');
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setStatus('idle');
         addLog('🔌 Disconnected');
         
-        // Attempt reconnect
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
         }
-        reconnectTimeoutRef.current = setTimeout(() => {
-          addLog('🔄 Attempting to reconnect...');
-          connect();
-        }, config.reconnectDelay);
+        
+        // Only attempt reconnect if not a normal closure
+        if (event.code !== 1000) {
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            setReconnectAttempts(prev => prev + 1);
+            addLog(`🔄 Reconnecting... (attempt ${reconnectAttempts + 1})`);
+            connect();
+          }, delay);
+        }
       };
     } catch (error) {
       setStatus('error');
@@ -609,14 +620,14 @@ const WebSocketConfigPanel = () => {
       heartbeatIntervalRef.current = null;
     }
     if (wsRef.current) {
-      wsRef.current.close();
+      wsRef.current.close(1000, 'Normal closure');
       wsRef.current = null;
     }
     setStatus('idle');
+    setReconnectAttempts(0);
     addLog('🔌 Disconnected');
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       disconnect();
@@ -768,9 +779,11 @@ const ConnectionHealthPanel = () => {
   });
   const [startTime] = useState(Date.now());
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const checkHealth = useCallback(async () => {
     try {
+      setError(null);
       const start = Date.now();
       const response = await fetch(`${BYBIT_API.mainnet}/v5/market/time`);
       const data = await response.json();
@@ -794,9 +807,11 @@ const ConnectionHealthPanel = () => {
         }));
       } else {
         setHealth(prev => ({ ...prev, status: 'error' }));
+        setError('Failed to get server time');
       }
     } catch (error) {
       setHealth(prev => ({ ...prev, status: 'error', latency: 999 }));
+      setError('Connection failed');
     } finally {
       setIsLoading(false);
     }
@@ -852,6 +867,13 @@ const ConnectionHealthPanel = () => {
           <RefreshCw size={14} />
         </button>
       </div>
+
+      {error && (
+        <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+          <AlertCircle size={12} />
+          {error}
+        </div>
+      )}
 
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">

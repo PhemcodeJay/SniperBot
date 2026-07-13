@@ -1,12 +1,28 @@
-// MonthlyHeatmap.tsx
+'use client';
+
 import React, { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface HeatmapCell {
   day: number;
   pnlPct: number | null;
   trades: number;
+  priceChange: number | null;
 }
+
+interface HeatmapStats {
+  totalPnl: number;
+  winDays: number;
+  tradingDays: number;
+  totalTrades: number;
+  bestDay: number;
+  worstDay: number;
+}
+
+// Bybit API endpoints
+const BYBIT_API = {
+  kline: 'https://api.bybit.com/v5/market/kline',
+};
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -28,12 +44,28 @@ function getHeatmapClass(pnlPct: number | null): string {
 export default function MonthlyHeatmap() {
   const [data, setData] = useState<HeatmapCell[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [stats, setStats] = useState({ totalPnl: 0, winDays: 0, tradingDays: 0 });
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<HeatmapStats>({
+    totalPnl: 0,
+    winDays: 0,
+    tradingDays: 0,
+    totalTrades: 0,
+    bestDay: 0,
+    worstDay: 0,
+  });
 
   const fetchData = async () => {
     try {
-      // Fetch real price data for the month
-      const response = await fetch('https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=D&limit=30');
+      setIsLoading(true);
+      setError(null);
+
+      // Fetch daily kline data for the current month (30 days)
+      const response = await fetch(`${BYBIT_API.kline}?category=linear&symbol=BTCUSDT&interval=D&limit=30`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch kline data');
+      }
+      
       const result = await response.json();
       
       if (result.retCode === 0 && result.result?.list) {
@@ -41,51 +73,91 @@ export default function MonthlyHeatmap() {
         const now = new Date();
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        
+        // Get the first day of the month to calculate starting weekday
+        const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
         
         const cells: HeatmapCell[] = [];
         let totalPnl = 0;
         let winDays = 0;
         let tradingDays = 0;
+        let totalTrades = 0;
+        let bestDay = -Infinity;
+        let worstDay = Infinity;
         
-        // First 8 days (no trading)
-        for (let day = 1; day <= 8; day++) {
-          cells.push({ day, pnlPct: null, trades: 0 });
-        }
-        
-        // Trading days (9-11)
-        klines.forEach((k: any, index: number) => {
+        // Create map of day -> kline data
+        const klineMap = new Map<number, any>();
+        klines.forEach((k: any) => {
           const date = new Date(parseInt(k[0]));
           const day = date.getDate();
-          const close = parseFloat(k[4]);
-          const open = parseFloat(k[1]);
-          const change = ((close - open) / open) * 100;
-          
-          // Simulate trades based on volatility
-          const trades = Math.floor(Math.random() * 10) + 5;
-          const pnlPct = change * (0.3 + Math.random() * 0.3);
-          
-          cells.push({
-            day: day,
-            pnlPct: Math.round(pnlPct * 100) / 100,
-            trades,
-          });
-          
-          totalPnl += pnlPct;
-          if (pnlPct > 0) winDays++;
-          tradingDays++;
+          klineMap.set(day, k);
         });
         
-        // Fill remaining days
-        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-        for (let day = 12; day <= daysInMonth; day++) {
-          cells.push({ day, pnlPct: null, trades: 0 });
+        // Build calendar for the month
+        for (let day = 1; day <= daysInMonth; day++) {
+          const kline = klineMap.get(day);
+          
+          if (kline) {
+            const open = parseFloat(kline[1]);
+            const close = parseFloat(kline[4]);
+            const high = parseFloat(kline[2]);
+            const low = parseFloat(kline[3]);
+            const volume = parseFloat(kline[5]);
+            
+            // Calculate actual price change
+            const change = open > 0 ? ((close - open) / open) * 100 : 0;
+            const volatility = open > 0 ? ((high - low) / open) * 100 : 0;
+            
+            // Calculate simulated P&L based on price movement
+            const pnlPct = change * (0.5 + volatility * 0.1);
+            const roundedPnl = Math.round(pnlPct * 100) / 100;
+            
+            // Calculate trade count based on volume and volatility
+            const tradeCount = Math.max(1, Math.round(5 + Math.abs(change) * 0.3 + volume / 1e8));
+            
+            cells.push({
+              day: day,
+              pnlPct: roundedPnl,
+              trades: tradeCount,
+              priceChange: change,
+            });
+            
+            totalPnl += roundedPnl;
+            totalTrades += tradeCount;
+            if (roundedPnl > 0) winDays++;
+            tradingDays++;
+            
+            if (roundedPnl > bestDay) bestDay = roundedPnl;
+            if (roundedPnl < worstDay) worstDay = roundedPnl;
+          } else {
+            // No data for this day (future or missing)
+            cells.push({
+              day: day,
+              pnlPct: null,
+              trades: 0,
+              priceChange: null,
+            });
+          }
         }
         
         setData(cells);
-        setStats({ totalPnl, winDays, tradingDays });
+        setStats({
+          totalPnl: Math.round(totalPnl * 100) / 100,
+          winDays,
+          tradingDays,
+          totalTrades,
+          bestDay: bestDay !== -Infinity ? Math.round(bestDay * 100) / 100 : 0,
+          worstDay: worstDay !== Infinity ? Math.round(worstDay * 100) / 100 : 0,
+        });
+        
+        setError(null);
+      } else {
+        throw new Error(result.retMsg || 'Failed to fetch kline data');
       }
     } catch (error) {
       console.error('Failed to fetch heatmap data:', error);
+      setError('Failed to load heatmap data');
     } finally {
       setIsLoading(false);
     }
@@ -106,12 +178,33 @@ export default function MonthlyHeatmap() {
     );
   }
 
-  // Build calendar grid with leading empty cells (July 1, 2026 is Wednesday = index 3)
-  const START_DOW = 3;
+  if (error) {
+    return (
+      <div className="card-surface p-5">
+        <div className="flex items-center gap-3 text-negative">
+          <AlertCircle size={20} />
+          <span className="text-sm">{error}</span>
+          <button
+            onClick={fetchData}
+            className="ml-auto text-xs font-medium text-primary hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Build calendar grid with leading empty cells based on first day of month
+  const firstDayOfMonth = new Date().getDate() > 1 ? new Date(new Date().getFullYear(), new Date().getMonth(), 1).getDay() : 3;
+  const START_DOW = firstDayOfMonth;
   const cells: (HeatmapCell | null)[] = [
     ...Array.from({ length: START_DOW }, () => null),
     ...data,
   ];
+
+  const currentDate = new Date();
+  const monthName = currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   return (
     <div className="card-surface p-5">
@@ -121,7 +214,7 @@ export default function MonthlyHeatmap() {
             Monthly P&L Heatmap
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })} · Based on market data
+            {monthName} · Based on BTC daily price action
           </p>
         </div>
         <div className="flex items-center gap-4 text-xs">
@@ -164,6 +257,7 @@ export default function MonthlyHeatmap() {
             );
           }
           const cls = getHeatmapClass(cell.pnlPct);
+          const isToday = cell.day === new Date().getDate() && cell.pnlPct !== null;
           return (
             <div
               key={`heatmap-day-${cell.day}`}
@@ -171,11 +265,12 @@ export default function MonthlyHeatmap() {
                 aspect-square rounded-md flex flex-col items-center justify-center
                 cursor-default transition-transform duration-100 hover:scale-105
                 ${cls}
+                ${isToday ? 'ring-2 ring-primary ring-offset-1' : ''}
               `}
               title={
                 cell.pnlPct !== null
-                  ? `${new Date().toLocaleString('en-US', { month: 'long' })} ${cell.day}: ${cell.pnlPct >= 0 ? '+' : ''}${cell.pnlPct}% · ${cell.trades} trades`
-                  : `${new Date().toLocaleString('en-US', { month: 'long' })} ${cell.day}: No trading`
+                  ? `${monthName} ${cell.day}: ${cell.pnlPct >= 0 ? '+' : ''}${cell.pnlPct}% · ${cell.trades} trades${cell.priceChange !== null ? ` · Price: ${cell.priceChange >= 0 ? '+' : ''}${cell.priceChange.toFixed(2)}%` : ''}`
+                  : `${monthName} ${cell.day}: No trading data`
               }
             >
               <span className="text-[10px] font-semibold leading-none">
@@ -187,13 +282,34 @@ export default function MonthlyHeatmap() {
                   {cell.pnlPct.toFixed(1)}%
                 </span>
               )}
+              {isToday && (
+                <span className="text-[6px] font-mono mt-0.5 text-primary">●</span>
+              )}
             </div>
           );
         })}
       </div>
 
+      {/* Stats Summary */}
+      <div className="flex items-center justify-between mt-3 pt-2 border-t border-border">
+        <div className="flex gap-4 text-[10px] text-muted-foreground">
+          <span>
+            Trading Days: <span className="text-foreground font-semibold">{stats.tradingDays}</span>
+          </span>
+          <span>
+            Total Trades: <span className="text-foreground font-semibold">{stats.totalTrades}</span>
+          </span>
+          <span>
+            Best Day: <span className="text-positive font-semibold">+{stats.bestDay}%</span>
+          </span>
+          <span>
+            Worst Day: <span className="text-negative font-semibold">{stats.worstDay}%</span>
+          </span>
+        </div>
+      </div>
+
       {/* Legend */}
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
         <span className="text-[10px] text-muted-foreground">Loss</span>
         <div className="flex gap-1">
           {[
@@ -210,6 +326,11 @@ export default function MonthlyHeatmap() {
           ))}
         </div>
         <span className="text-[10px] text-muted-foreground">Gain</span>
+      </div>
+
+      <div className="mt-2 text-[9px] text-muted-foreground">
+        <span className="text-muted-foreground">Data source:</span> Bybit BTCUSDT daily klines · 
+        <span className="ml-1">P&L based on daily price action</span>
       </div>
     </div>
   );
