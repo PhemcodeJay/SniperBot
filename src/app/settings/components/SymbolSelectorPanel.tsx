@@ -1,36 +1,23 @@
+// SymbolSelectorPanel.tsx
 'use client';
 
-import React, { useState } from 'react';
-import { Search, X, TrendingUp, Star } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, X, TrendingUp, Star, Loader2 } from 'lucide-react';
 
-const ALL_SYMBOLS = [
-  { symbol: 'BTCUSDT', name: 'Bitcoin', category: 'Major', volume: '$4.2B' },
-  { symbol: 'ETHUSDT', name: 'Ethereum', category: 'Major', volume: '$1.8B' },
-  { symbol: 'SOLUSDT', name: 'Solana', category: 'Major', volume: '$890M' },
-  { symbol: 'BNBUSDT', name: 'BNB', category: 'Major', volume: '$620M' },
-  { symbol: 'XRPUSDT', name: 'XRP', category: 'Major', volume: '$540M' },
-  { symbol: 'DOGEUSDT', name: 'Dogecoin', category: 'Meme', volume: '$480M' },
-  { symbol: 'ADAUSDT', name: 'Cardano', category: 'Alt', volume: '$320M' },
-  { symbol: 'AVAXUSDT', name: 'Avalanche', category: 'Alt', volume: '$290M' },
-  { symbol: 'LINKUSDT', name: 'Chainlink', category: 'Alt', volume: '$260M' },
-  { symbol: 'DOTUSDT', name: 'Polkadot', category: 'Alt', volume: '$210M' },
-  { symbol: 'MATICUSDT', name: 'Polygon', category: 'Alt', volume: '$195M' },
-  { symbol: 'LTCUSDT', name: 'Litecoin', category: 'Alt', volume: '$180M' },
-  { symbol: 'NEARUSDT', name: 'NEAR Protocol', category: 'Alt', volume: '$165M' },
-  { symbol: 'APTUSDT', name: 'Aptos', category: 'Alt', volume: '$155M' },
-  { symbol: 'ARBUSDT', name: 'Arbitrum', category: 'L2', volume: '$140M' },
-  { symbol: 'OPUSDT', name: 'Optimism', category: 'L2', volume: '$130M' },
-  { symbol: 'SUIUSDT', name: 'Sui', category: 'Alt', volume: '$125M' },
-  { symbol: 'INJUSDT', name: 'Injective', category: 'Alt', volume: '$115M' },
-  { symbol: 'SEIUSDT', name: 'Sei', category: 'Alt', volume: '$105M' },
-  { symbol: 'TIAUSDT', name: 'Celestia', category: 'Alt', volume: '$98M' },
-];
+interface SymbolData {
+  symbol: string;
+  name: string;
+  category: string;
+  volume: string;
+  price: string;
+  change24h: string;
+}
 
 const CATEGORY_COLORS: Record<string, string> = {
-  Major: 'bg-primary/10 text-primary',
-  Meme: 'bg-warning-subtle text-warning',
-  Alt: 'bg-info-subtle text-info',
-  L2: 'bg-positive-subtle text-positive',
+  'Major': 'bg-primary/10 text-primary',
+  'Meme': 'bg-warning-subtle text-warning',
+  'Alt': 'bg-info-subtle text-info',
+  'L2': 'bg-positive-subtle text-positive',
 };
 
 const DEFAULT_SELECTED = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
@@ -39,8 +26,74 @@ export default function SymbolSelectorPanel() {
   const [selected, setSelected] = useState<string[]>(DEFAULT_SELECTED);
   const [search, setSearch] = useState('');
   const [saved, setSaved] = useState(false);
+  const [symbols, setSymbols] = useState<SymbolData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filtered = ALL_SYMBOLS.filter(
+  // Fetch real symbols and data from Bybit
+  useEffect(() => {
+    const fetchSymbols = async () => {
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        // Fetch ticker data for all symbols
+        const response = await fetch('https://api.bybit.com/v5/market/tickers?category=linear');
+        const data = await response.json();
+        
+        if (data.retCode === 0 && data.result?.list) {
+          const tickers = data.result.list;
+          
+          // Map to our symbol data structure
+          const mappedSymbols: SymbolData[] = tickers.map((ticker: any) => {
+            const volume = parseFloat(ticker.volume24h) || 0;
+            const price = parseFloat(ticker.lastPrice) || 0;
+            const change24h = parseFloat(ticker.price24hPcnt) * 100 || 0;
+            
+            // Categorize based on market cap or common knowledge
+            let category = 'Alt';
+            const symbol = ticker.symbol;
+            if (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'].includes(symbol)) {
+              category = 'Major';
+            } else if (['DOGEUSDT', 'SHIBUSDT', 'PEPEUSDT'].includes(symbol)) {
+              category = 'Meme';
+            } else if (['ARBUSDT', 'OPUSDT'].includes(symbol)) {
+              category = 'L2';
+            }
+            
+            return {
+              symbol: symbol,
+              name: symbol.replace('USDT', '').replace('USDC', ''),
+              category: category,
+              volume: `$${(volume / 1e6).toFixed(1)}M`,
+              price: price.toFixed(2),
+              change24h: change24h.toFixed(2) + '%',
+            };
+          });
+          
+          // Filter for USDT pairs and sort by volume
+          const usdtPairs = mappedSymbols
+            .filter(s => s.symbol.endsWith('USDT'))
+            .sort((a, b) => parseFloat(b.volume) - parseFloat(a.volume))
+            .slice(0, 50); // Top 50 by volume
+          
+          setSymbols(usdtPairs);
+        } else {
+          throw new Error(data.retMsg || 'Failed to fetch symbols');
+        }
+      } catch (err: any) {
+        setError(err.message || 'Failed to load symbols');
+        // Fallback to mock data if API fails
+        setSymbols([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchSymbols();
+  }, []);
+
+  const filtered = symbols.filter(
     (s) =>
       s.symbol.toLowerCase().includes(search.toLowerCase()) ||
       s.name.toLowerCase().includes(search.toLowerCase())
@@ -62,6 +115,17 @@ export default function SymbolSelectorPanel() {
     setTimeout(() => setSaved(false), 2500);
   };
 
+  if (isLoading) {
+    return (
+      <div className="bg-card border border-border rounded-xl p-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 size={24} className="animate-spin text-primary" />
+          <span className="ml-3 text-muted-foreground">Loading symbols...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-card border border-border rounded-xl p-6">
       <div className="flex items-center gap-3 mb-5">
@@ -77,6 +141,12 @@ export default function SymbolSelectorPanel() {
           {selected.length}/20
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 rounded-lg bg-negative-subtle border border-negative/20 text-negative text-xs">
+          ⚠️ {error} — Using cached data
+        </div>
+      )}
 
       {/* Selected chips */}
       {selected.length > 0 && (
@@ -109,36 +179,42 @@ export default function SymbolSelectorPanel() {
 
       {/* Symbol grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-64 overflow-y-auto scrollbar-thin pr-1">
-        {filtered.map((item) => {
-          const isSelected = selected.includes(item.symbol);
-          return (
-            <button
-              key={item.symbol}
-              onClick={() => toggle(item.symbol)}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left transition-all duration-100 ${
-                isSelected
-                  ? 'bg-primary/10 border-primary/30 text-foreground'
-                  : 'bg-background border-border text-secondary-foreground hover:border-primary/20 hover:bg-muted'
-              }`}
-            >
-              <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                isSelected ? 'bg-primary border-primary' : 'border-border'
-              }`}>
-                {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-mono font-semibold text-foreground truncate">{item.symbol}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{item.name}</p>
-              </div>
-              <div className="flex flex-col items-end gap-0.5 shrink-0">
-                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[item.category]}`}>
-                  {item.category}
-                </span>
-                <span className="text-[9px] text-muted-foreground font-mono">{item.volume}</span>
-              </div>
-            </button>
-          );
-        })}
+        {filtered.length > 0 ? (
+          filtered.map((item) => {
+            const isSelected = selected.includes(item.symbol);
+            return (
+              <button
+                key={item.symbol}
+                onClick={() => toggle(item.symbol)}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left transition-all duration-100 ${
+                  isSelected
+                    ? 'bg-primary/10 border-primary/30 text-foreground'
+                    : 'bg-background border-border text-secondary-foreground hover:border-primary/20 hover:bg-muted'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                  isSelected ? 'bg-primary border-primary' : 'border-border'
+                }`}>
+                  {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-mono font-semibold text-foreground truncate">{item.symbol}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{item.name}</p>
+                </div>
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
+                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[item.category] || 'bg-muted text-muted-foreground'}`}>
+                    {item.category}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground font-mono">{item.volume}</span>
+                </div>
+              </button>
+            );
+          })
+        ) : (
+          <div className="col-span-2 text-center py-8 text-muted-foreground text-sm">
+            No symbols found
+          </div>
+        )}
       </div>
 
       <button

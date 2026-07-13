@@ -1,7 +1,62 @@
-import React from 'react';
-import { RefreshCw, Bell, Wifi } from 'lucide-react';
+// DashboardHeader.tsx
+import React, { useState, useEffect } from 'react';
+import { RefreshCw, Bell, Wifi, Loader2 } from 'lucide-react';
+
+interface HeaderData {
+  status: 'connected' | 'disconnected' | 'connecting';
+  latency: number;
+  lastUpdated: string;
+  date: string;
+}
 
 export default function DashboardHeader() {
+  const [data, setData] = useState<HeaderData>({
+    status: 'connecting',
+    latency: 0,
+    lastUpdated: new Date().toLocaleTimeString(),
+    date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+  });
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const fetchConnectionStatus = async () => {
+    try {
+      const start = Date.now();
+      const response = await fetch('https://api.bybit.com/v5/market/time');
+      const latency = Date.now() - start;
+
+      if (response.ok) {
+        setData(prev => ({
+          ...prev,
+          status: 'connected',
+          latency,
+          lastUpdated: new Date().toLocaleTimeString(),
+        }));
+      } else {
+        setData(prev => ({ ...prev, status: 'disconnected' }));
+      }
+    } catch (error) {
+      setData(prev => ({ ...prev, status: 'disconnected' }));
+    }
+  };
+
+  useEffect(() => {
+    fetchConnectionStatus();
+    const interval = setInterval(fetchConnectionStatus, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchConnectionStatus();
+    setIsRefreshing(false);
+  };
+
+  const statusColor = {
+    connected: 'text-positive',
+    disconnected: 'text-negative',
+    connecting: 'text-warning',
+  };
+
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
       <div>
@@ -15,22 +70,26 @@ export default function DashboardHeader() {
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
-            <Wifi size={11} className="text-positive" />
-            <span>Bybit WS · 12ms latency</span>
+            <Wifi size={11} className={statusColor[data.status]} />
+            <span>
+              Bybit WS · {data.status === 'connected' ? `${data.latency}ms latency` : data.status}
+            </span>
           </div>
           <span>·</span>
-          <span className="font-mono">Last updated: 23:59:18</span>
+          <span className="font-mono">Last updated: {data.lastUpdated}</span>
           <span>·</span>
-          <span>Jul 11, 2026</span>
+          <span>{data.date}</span>
         </div>
       </div>
 
       <div className="flex items-center gap-2">
         <button
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground bg-muted hover:text-foreground hover:bg-muted/80 transition-all duration-150 active:scale-95"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground bg-muted hover:text-foreground hover:bg-muted/80 transition-all duration-150 active:scale-95 disabled:opacity-50"
           aria-label="Refresh dashboard data"
         >
-          <RefreshCw size={12} />
+          {isRefreshing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
           Refresh
         </button>
         <button

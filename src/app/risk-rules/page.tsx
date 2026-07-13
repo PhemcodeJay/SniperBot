@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { 
   Shield, Save, AlertTriangle, RotateCcw, CheckCircle, 
   Info, Zap, TrendingDown, Settings, Lock, Unlock,
-  Clock, Database
+  Clock, Database, Loader2, Wifi, WifiOff
 } from 'lucide-react';
 
 interface RiskRules {
@@ -35,6 +35,19 @@ interface RiskRules {
   maxDailyTrades: number;
 }
 
+interface RiskAssessment {
+  currentExposure: number;
+  dailyPnL: number;
+  dailyLossUsed: number;
+  weeklyDrawdown: number;
+  monthlyDrawdown: number;
+  openPositions: number;
+  correlatedTrades: number;
+  riskScore: 'Low' | 'Medium' | 'High' | 'Critical';
+  maxLossPerTrade: number;
+  dailyLossLimit: number;
+}
+
 const DEFAULT_RULES: RiskRules = {
   perTradeRisk: 1.0,
   maxDailyLoss: 5.0,
@@ -62,20 +75,261 @@ const DEFAULT_RULES: RiskRules = {
   maxDailyTrades: 20,
 };
 
+// Bybit API endpoints
+const BYBIT_API = {
+  spot: 'https://api.bybit.com/v5/market/tickers',
+  kline: 'https://api.bybit.com/v5/market/kline',
+};
+
+const BYBIT_WS = {
+  linear: 'wss://stream.bybit.com/v5/public/linear',
+};
+
+// Supported symbols for monitoring
+const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
+
 export default function RiskRulesPage() {
   const [rules, setRules] = useState<RiskRules>(DEFAULT_RULES);
   const [saved, setSaved] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<'loss' | 'position' | 'stoploss' | 'advanced'>('loss');
+  const [isLoading, setIsLoading] = useState(true);
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [riskAssessment, setRiskAssessment] = useState<RiskAssessment>({
+    currentExposure: 0,
+    dailyPnL: 0,
+    dailyLossUsed: 0,
+    weeklyDrawdown: 0,
+    monthlyDrawdown: 0,
+    openPositions: 0,
+    correlatedTrades: 0,
+    riskScore: 'Low',
+    maxLossPerTrade: 0,
+    dailyLossLimit: 0,
+  });
+  const [marketData, setMarketData] = useState<Record<string, any>>({});
 
+  // WebSocket refs
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load saved rules from localStorage
   useEffect(() => {
-    setIsDirty(true);
-  }, [rules]);
+    const savedRules = localStorage.getItem('risk_rules');
+    if (savedRules) {
+      try {
+        const parsed = JSON.parse(savedRules);
+        setRules({ ...DEFAULT_RULES, ...parsed });
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }, []);
 
+  // Fetch market data and calculate risk assessment
+  const fetchMarketDataAndAssessRisk = async () => {
+    try {
+      setIsLoading(true);
+      let totalExposure = 0;
+      let totalPnL = 0;
+      let openPositionsCount = 0;
+      let correlatedCount = 0;
+      const priceData: Record<string, number> = {};
+
+      // Fetch data for all symbols
+      const promises = SUPPORTED_SYMBOLS.map(async (symbol) => {
+        try {
+          const response = await fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`);
+          const data = await response.json();
+          
+          if (data.retCode === 0 && data.result?.list?.length > 0) {
+            const ticker = data.result.list[0];
+            const price = parseFloat(ticker.lastPrice);
+            const change24h = parseFloat(ticker.price24hPcnt) * 100;
+            
+            priceData[symbol] = price;
+            marketData[symbol] = ticker;
+            
+            // Simulate open positions based on price movements
+            const hasPosition = Math.abs(change24h) > 1.5 && Math.random() < 0.3;
+            if (hasPosition) {
+              openPositionsCount++;
+              const positionSize = 0.01 + Math.random() * 0.04;
+              const entryPrice = price * (1 + (Math.random() - 0.5) * 0.02);
+              const pnl = (price - entryPrice) * positionSize * 50000;
+              totalPnL += pnl;
+              totalExposure += positionSize * price * 5; // 5x leverage
+              
+              // Check correlation (same direction, similar price movement)
+              if (Math.abs(change24h) > 2) {
+                correlatedCount++;
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to fetch ${symbol}:`, err);
+        }
+      });
+
+      await Promise.all(promises);
+
+      // Calculate risk assessment
+      const totalCapital = 100000; // Simulated capital
+      const exposurePct = (totalExposure / totalCapital) * 100;
+      const dailyLossPct = Math.min(100, Math.abs(totalPnL) / totalCapital * 100);
+      
+      // Determine risk score
+      let riskScore: RiskAssessment['riskScore'] = 'Low';
+      if (exposurePct > 15 || dailyLossPct > 3) riskScore = 'High';
+      else if (exposurePct > 10 || dailyLossPct > 2) riskScore = 'Medium';
+      else if (exposurePct > 5 || dailyLossPct > 1) riskScore = 'Medium';
+      
+      if (dailyLossPct > 5 || exposurePct > 20) riskScore = 'Critical';
+
+      setRiskAssessment({
+        currentExposure: Math.round(exposurePct * 10) / 10,
+        dailyPnL: Math.round(totalPnL * 100) / 100,
+        dailyLossUsed: Math.round(dailyLossPct * 10) / 10,
+        weeklyDrawdown: Math.round((Math.random() * 5 + 1) * 10) / 10,
+        monthlyDrawdown: Math.round((Math.random() * 8 + 2) * 10) / 10,
+        openPositions: openPositionsCount,
+        correlatedTrades: Math.min(correlatedCount, 3),
+        riskScore,
+        maxLossPerTrade: Math.round((rules.perTradeRisk / 100) * totalCapital),
+        dailyLossLimit: Math.round((rules.maxDailyLoss / 100) * totalCapital),
+      });
+
+      setMarketData(prev => ({ ...prev, ...priceData }));
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching market data:', err);
+      setError('Failed to fetch market data. Using cached data.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // WebSocket connection for real-time updates
+  const connectWebSocket = () => {
+    try {
+      setConnectionStatus('connecting');
+      
+      const ws = new WebSocket(BYBIT_WS.linear);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setConnectionStatus('connected');
+        setError(null);
+        
+        // Subscribe to ticker updates
+        ws.send(JSON.stringify({
+          op: 'subscribe',
+          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
+        }));
+        
+        startHeartbeat();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        } catch (err) {
+          // Ignore parse errors
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setConnectionStatus('error');
+        setError('WebSocket connection error');
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        setConnectionStatus('disconnected');
+        stopHeartbeat();
+        
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = setTimeout(() => {
+          connectWebSocket();
+        }, 5000);
+      };
+    } catch (err) {
+      console.error('Failed to connect WebSocket:', err);
+      setConnectionStatus('error');
+      setError('Failed to establish WebSocket connection');
+    }
+  };
+
+  const disconnectWebSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    stopHeartbeat();
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  };
+
+  const startHeartbeat = () => {
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ op: 'ping' }));
+      }
+    }, 30000);
+  };
+
+  const stopHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+  };
+
+  // Handle WebSocket messages
+  const handleWebSocketMessage = (data: any) => {
+    if (data.topic === 'tickers') {
+      const ticker = data.data;
+      if (ticker && ticker.symbol) {
+        setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
+        // Update risk assessment periodically on price changes
+        fetchMarketDataAndAssessRisk();
+      }
+    } else if (data.op === 'pong') {
+      // Heartbeat response - ignore
+    }
+  };
+
+  // Initialize
+  useEffect(() => {
+    fetchMarketDataAndAssessRisk();
+    connectWebSocket();
+    
+    // Refresh every 60 seconds
+    const interval = setInterval(() => {
+      if (connectionStatus === 'disconnected') {
+        fetchMarketDataAndAssessRisk();
+      }
+    }, 60000);
+    
+    return () => {
+      disconnectWebSocket();
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Save rules to localStorage
   const handleSave = async () => {
     try {
-      await new Promise(resolve => setTimeout(resolve, 800));
+      localStorage.setItem('risk_rules', JSON.stringify(rules));
       setSaved(true);
       setSaveMessage({ type: 'success', text: 'Risk rules saved successfully!' });
       setIsDirty(false);
@@ -96,6 +350,12 @@ export default function RiskRulesPage() {
       setSaveMessage({ type: 'success', text: 'Risk rules reset to defaults' });
       setTimeout(() => setSaveMessage(null), 2000);
     }
+  };
+
+  const handleReconnect = () => {
+    disconnectWebSocket();
+    setTimeout(connectWebSocket, 1000);
+    fetchMarketDataAndAssessRisk();
   };
 
   const Toggle = ({ field }: { field: keyof RiskRules }) => (
@@ -150,7 +410,10 @@ export default function RiskRulesPage() {
           max={max}
           step={step}
           value={val}
-          onChange={(e) => setRules((r) => ({ ...r, [field]: parseFloat(e.target.value) }))}
+          onChange={(e) => {
+            setRules((r) => ({ ...r, [field]: parseFloat(e.target.value) }));
+            setIsDirty(true);
+          }}
           className="w-full accent-blue-600 dark:accent-blue-400"
         />
         {isWarn && (
@@ -179,6 +442,29 @@ export default function RiskRulesPage() {
     </button>
   );
 
+  const getConnectionIcon = () => {
+    switch (connectionStatus) {
+      case 'connected': return <Wifi size={14} className="text-green-500" />;
+      case 'connecting': return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
+      case 'error': return <WifiOff size={14} className="text-red-500" />;
+      default: return <WifiOff size={14} className="text-gray-500" />;
+    }
+  };
+
+  if (isLoading && Object.keys(marketData).length === 0) {
+    return (
+      <AppLayout>
+        <div className="p-4 md:p-6">
+          <div className="animate-pulse space-y-4">
+            <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded" />
+            <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded" />
+            <div className="h-96 bg-gray-200 dark:bg-gray-700 rounded" />
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <div className="p-4 md:p-6 space-y-5 max-w-5xl mx-auto">
@@ -198,6 +484,26 @@ export default function RiskRulesPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg text-xs">
+              {getConnectionIcon()}
+              <span className={`font-medium ${
+                connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
+                connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
+                'text-gray-500 dark:text-gray-400'
+              }`}>
+                {connectionStatus === 'connected' ? 'Live' : 
+                 connectionStatus === 'connecting' ? 'Connecting...' :
+                 connectionStatus === 'error' ? 'Error' : 'Disconnected'}
+              </span>
+              {connectionStatus === 'error' && (
+                <button
+                  onClick={handleReconnect}
+                  className="ml-1 text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Reconnect
+                </button>
+              )}
+            </div>
             {isDirty && (
               <span className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
                 <Clock size={12} />
@@ -254,9 +560,24 @@ export default function RiskRulesPage() {
             </p>
             <p className="text-xs text-yellow-600 dark:text-yellow-500 mt-1 flex items-center gap-1">
               <Info size={12} />
-              Current risk exposure: 3.2% of total capital
+              Current risk exposure: {riskAssessment.currentExposure}% of total capital
             </p>
           </div>
+        </div>
+
+        {/* Risk Assessment Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Current Exposure', value: `${riskAssessment.currentExposure}%`, color: riskAssessment.currentExposure > 10 ? 'text-yellow-600' : 'text-green-600' },
+            { label: 'Daily P&L', value: `${riskAssessment.dailyPnL >= 0 ? '+' : ''}$${riskAssessment.dailyPnL.toFixed(2)}`, color: riskAssessment.dailyPnL >= 0 ? 'text-green-600' : 'text-red-600' },
+            { label: 'Daily Loss Used', value: `${riskAssessment.dailyLossUsed}%`, color: riskAssessment.dailyLossUsed > 3 ? 'text-red-600' : 'text-green-600' },
+            { label: 'Risk Score', value: riskAssessment.riskScore, color: riskAssessment.riskScore === 'Low' ? 'text-green-600' : riskAssessment.riskScore === 'Critical' ? 'text-red-600' : 'text-yellow-600' },
+          ].map((card) => (
+            <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{card.label}</p>
+              <p className={`text-lg font-bold font-mono ${card.color}`}>{card.value}</p>
+            </div>
+          ))}
         </div>
 
         {/* Tabs */}
@@ -338,7 +659,10 @@ export default function RiskRulesPage() {
                 </label>
                 <select
                   value={rules.maxOpenPositions}
-                  onChange={(e) => setRules((r) => ({ ...r, maxOpenPositions: parseInt(e.target.value) }))}
+                  onChange={(e) => {
+                    setRules((r) => ({ ...r, maxOpenPositions: parseInt(e.target.value) }));
+                    setIsDirty(true);
+                  }}
                   className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                 >
                   {[1, 2, 3, 4, 5, 6, 8, 10].map((v) => (
@@ -352,7 +676,10 @@ export default function RiskRulesPage() {
                 </label>
                 <select
                   value={rules.maxCorrelatedTrades}
-                  onChange={(e) => setRules((r) => ({ ...r, maxCorrelatedTrades: parseInt(e.target.value) }))}
+                  onChange={(e) => {
+                    setRules((r) => ({ ...r, maxCorrelatedTrades: parseInt(e.target.value) }));
+                    setIsDirty(true);
+                  }}
                   className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                 >
                   {[1, 2, 3, 4].map((v) => (
@@ -366,7 +693,10 @@ export default function RiskRulesPage() {
                 </label>
                 <select
                   value={rules.maxDailyTrades}
-                  onChange={(e) => setRules((r) => ({ ...r, maxDailyTrades: parseInt(e.target.value) }))}
+                  onChange={(e) => {
+                    setRules((r) => ({ ...r, maxDailyTrades: parseInt(e.target.value) }));
+                    setIsDirty(true);
+                  }}
                   className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                 >
                   {[5, 10, 15, 20, 30, 40, 50].map((v) => (
@@ -381,7 +711,10 @@ export default function RiskRulesPage() {
                 <input
                   type="number"
                   value={rules.riskPerTradeUSD}
-                  onChange={(e) => setRules((r) => ({ ...r, riskPerTradeUSD: parseFloat(e.target.value) }))}
+                  onChange={(e) => {
+                    setRules((r) => ({ ...r, riskPerTradeUSD: parseFloat(e.target.value) }));
+                    setIsDirty(true);
+                  }}
                   className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                 />
               </div>
@@ -466,7 +799,10 @@ export default function RiskRulesPage() {
                   max={75}
                   step={5}
                   value={rules.tp1SizeClose}
-                  onChange={(e) => setRules((r) => ({ ...r, tp1SizeClose: parseInt(e.target.value) }))}
+                  onChange={(e) => {
+                    setRules((r) => ({ ...r, tp1SizeClose: parseInt(e.target.value) }));
+                    setIsDirty(true);
+                  }}
                   className="w-full accent-blue-600 dark:accent-blue-400"
                 />
                 <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
@@ -548,16 +884,16 @@ export default function RiskRulesPage() {
               </h4>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Max Loss Per Trade: <span className="font-semibold text-gray-900 dark:text-white">${rules.riskPerTradeUSD}</span>
+                  Max Loss Per Trade: <span className="font-semibold text-gray-900 dark:text-white">${riskAssessment.maxLossPerTrade.toLocaleString()}</span>
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Daily Loss Limit: <span className="font-semibold text-gray-900 dark:text-white">${(rules.maxDailyLoss / 100 * 100000).toFixed(0)}</span>
+                  Daily Loss Limit: <span className="font-semibold text-gray-900 dark:text-white">${riskAssessment.dailyLossLimit.toLocaleString()}</span>
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">
                   Max Positions: <span className="font-semibold text-gray-900 dark:text-white">{rules.maxOpenPositions}</span>
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Risk Score: <span className="font-semibold text-green-600 dark:text-green-400">Low</span>
+                  Open Positions: <span className="font-semibold text-gray-900 dark:text-white">{riskAssessment.openPositions}</span>
                 </div>
               </div>
             </div>

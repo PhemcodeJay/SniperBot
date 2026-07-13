@@ -1,3 +1,4 @@
+// ApiCredentialsPanel.tsx
 'use client';
 
 import React, { useState } from 'react';
@@ -17,6 +18,12 @@ interface TestResult {
   accountInfo?: { balance: string; uid: string };
 }
 
+// Bybit API endpoints
+const BYBIT_API = {
+  paper: 'https://api-testnet.bybit.com',
+  live: 'https://api.bybit.com',
+};
+
 export default function ApiCredentialsPanel() {
   const [activeMode, setActiveMode] = useState<TradingMode>('paper');
   const [showSecret, setShowSecret] = useState<Record<TradingMode, boolean>>({ paper: false, live: false });
@@ -34,32 +41,73 @@ export default function ApiCredentialsPanel() {
     setTestResult((prev) => ({ ...prev, [mode]: { status: 'idle', message: '' } }));
   };
 
+  // Generate signature for Bybit API
+  const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+    const crypto = require('crypto');
+    const paramStr = timestamp + apiSecret + recvWindow + params;
+    return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+  };
+
   const handleTest = async (mode: TradingMode) => {
     const creds = credentials[mode];
     if (!creds.apiKey || !creds.apiSecret) {
       setTestResult((prev) => ({ ...prev, [mode]: { status: 'error', message: 'API Key and Secret are required.' } }));
       return;
     }
+
     setTestResult((prev) => ({ ...prev, [mode]: { status: 'testing', message: 'Connecting to Bybit...' } }));
     const start = Date.now();
-    // Simulate API validation — replace with real Bybit /v5/account/wallet-balance call
-    await new Promise((r) => setTimeout(r, 1400));
-    const latency = Date.now() - start;
-    const isValid = creds.apiKey.length >= 18 && creds.apiSecret.length >= 36;
-    if (isValid) {
+
+    try {
+      const timestamp = Date.now().toString();
+      const recvWindow = '5000';
+      const params = '';
+
+      // Generate signature for wallet balance endpoint
+      const signature = generateSignature(creds.apiSecret, timestamp, recvWindow, params);
+
+      const response = await fetch(`${BYBIT_API[mode]}/v5/account/wallet-balance`, {
+        method: 'GET',
+        headers: {
+          'X-BAPI-API-KEY': creds.apiKey,
+          'X-BAPI-TIMESTAMP': timestamp,
+          'X-BAPI-SIGN': signature,
+          'X-BAPI-RECV-WINDOW': recvWindow,
+        },
+      });
+
+      const data = await response.json();
+      const latency = Date.now() - start;
+
+      if (data.retCode === 0 && data.result) {
+        const wallet = data.result.list?.[0];
+        const totalBalance = wallet?.totalEquity || '0';
+        const uid = data.result.uid || 'N/A';
+
+        setTestResult((prev) => ({
+          ...prev,
+          [mode]: {
+            status: 'success',
+            message: 'Connection verified successfully.',
+            latency,
+            accountInfo: {
+              balance: `${parseFloat(totalBalance).toFixed(2)} USDT`,
+              uid: uid,
+            },
+          },
+        }));
+      } else {
+        throw new Error(data.retMsg || 'Invalid credentials or API error');
+      }
+    } catch (error: any) {
+      const latency = Date.now() - start;
       setTestResult((prev) => ({
         ...prev,
         [mode]: {
-          status: 'success',
-          message: 'Connection verified successfully.',
+          status: 'error',
+          message: error.message || 'Failed to connect. Check your credentials and network.',
           latency,
-          accountInfo: { balance: mode === 'paper' ? '10,000.00 USDT' : '—', uid: 'UID-' + creds.apiKey.slice(-6).toUpperCase() },
         },
-      }));
-    } else {
-      setTestResult((prev) => ({
-        ...prev,
-        [mode]: { status: 'error', message: 'Invalid credentials. Check your API Key and Secret.', latency },
       }));
     }
   };

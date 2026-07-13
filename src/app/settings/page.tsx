@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { 
   Settings, ExternalLink, Save, Key, Shield, 
   Wifi, WifiOff, RefreshCw, CheckCircle, XCircle,
   AlertCircle, Eye, EyeOff, Copy, Check,
-  Network, Database, Activity, Server
+  Network, Database, Activity, Server, Loader2
 } from 'lucide-react';
 
 // ============== TYPES ==============
@@ -22,6 +22,9 @@ interface SymbolConfig {
   enabled: boolean;
   baseAsset: string;
   quoteAsset: string;
+  price: string;
+  volume24h: string;
+  change24h: string;
 }
 
 interface WebSocketConfig {
@@ -44,6 +47,31 @@ interface ConnectionHealth {
   quality: 'excellent' | 'good' | 'fair' | 'poor';
 }
 
+// ============== BYBIT API CONSTANTS ==============
+const BYBIT_API = {
+  testnet: 'https://api-testnet.bybit.com',
+  mainnet: 'https://api.bybit.com',
+};
+
+const BYBIT_WS = {
+  testnet: 'wss://stream-testnet.bybit.com/v5/public/linear',
+  mainnet: 'wss://stream.bybit.com/v5/public/linear',
+};
+
+// ============== UTILITY FUNCTIONS ==============
+const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+  const crypto = require('crypto');
+  const paramStr = timestamp + apiSecret + recvWindow + params;
+  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+};
+
+const formatTime = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return `${h}h ${m}m ${s}s`;
+};
+
 // ============== COMPONENTS ==============
 
 // API Credentials Panel
@@ -56,24 +84,82 @@ const ApiCredentialsPanel = () => {
   });
   const [showSecret, setShowSecret] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [testMessage, setTestMessage] = useState('');
   const [copied, setCopied] = useState(false);
+  const [balance, setBalance] = useState<string>('');
+  const [uid, setUid] = useState<string>('');
+
+  const testConnection = async () => {
+    if (!credentials.apiKey || !credentials.apiSecret) {
+      setTestStatus('error');
+      setTestMessage('API Key and Secret are required');
+      return;
+    }
+
+    setIsTesting(true);
+    setTestStatus('idle');
+    setTestMessage('');
+
+    const baseUrl = credentials.isTestnet ? BYBIT_API.testnet : BYBIT_API.mainnet;
+    const timestamp = Date.now().toString();
+    const recvWindow = '5000';
+    const params = '';
+
+    try {
+      const signature = generateSignature(credentials.apiSecret, timestamp, recvWindow, params);
+      
+      const response = await fetch(`${baseUrl}/v5/account/wallet-balance`, {
+        method: 'GET',
+        headers: {
+          'X-BAPI-API-KEY': credentials.apiKey,
+          'X-BAPI-TIMESTAMP': timestamp,
+          'X-BAPI-SIGN': signature,
+          'X-BAPI-RECV-WINDOW': recvWindow,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.retCode === 0 && data.result) {
+        const wallet = data.result.list?.[0];
+        const totalBalance = wallet?.totalEquity || '0';
+        const accountUid = data.result.uid || 'N/A';
+        
+        setBalance(`${parseFloat(totalBalance).toFixed(2)} USDT`);
+        setUid(accountUid);
+        setTestStatus('success');
+        setTestMessage('Connection verified successfully!');
+      } else {
+        throw new Error(data.retMsg || 'Invalid credentials or API error');
+      }
+    } catch (error: any) {
+      setTestStatus('error');
+      setTestMessage(error.message || 'Failed to connect to Bybit API');
+    } finally {
+      setIsTesting(false);
+    }
+  };
 
   const handleSave = async () => {
+    if (!credentials.apiKey || !credentials.apiSecret) {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+      return;
+    }
+
     setIsSaving(true);
     setSaveStatus('idle');
     
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Validate inputs
-      if (!credentials.apiKey || credentials.apiKey.length < 10) {
-        throw new Error('Invalid API Key format');
-      }
-      if (!credentials.apiSecret || credentials.apiSecret.length < 10) {
-        throw new Error('Invalid API Secret format');
-      }
+      // Save to localStorage for demo purposes
+      localStorage.setItem('bybit_credentials', JSON.stringify({
+        apiKey: credentials.apiKey,
+        apiSecret: credentials.apiSecret,
+        isTestnet: credentials.isTestnet,
+      }));
       
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
@@ -85,17 +171,29 @@ const ApiCredentialsPanel = () => {
     }
   };
 
-  const handleTestConnection = async () => {
-    // Simulate connection test
-    setSaveStatus('idle');
-    // Would call API to test connection
-  };
-
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Load saved credentials on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('bybit_credentials');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setCredentials(prev => ({
+          ...prev,
+          apiKey: parsed.apiKey || '',
+          apiSecret: parsed.apiSecret || '',
+          isTestnet: parsed.isTestnet !== undefined ? parsed.isTestnet : true,
+        }));
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }, []);
 
   return (
     <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5 space-y-4">
@@ -123,7 +221,7 @@ const ApiCredentialsPanel = () => {
               type="text"
               value={credentials.apiKey}
               onChange={(e) => setCredentials({ ...credentials, apiKey: e.target.value })}
-              placeholder="Enter your API key"
+              placeholder={credentials.isTestnet ? 'Testnet API Key' : 'Mainnet API Key'}
               className="w-full px-3 py-2 pr-24 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
             />
             {credentials.apiKey && (
@@ -190,11 +288,16 @@ const ApiCredentialsPanel = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={handleTestConnection}
-            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            onClick={testConnection}
+            disabled={isTesting}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
           >
-            <Wifi size={14} />
-            Test Connection
+            {isTesting ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Wifi size={14} />
+            )}
+            {isTesting ? 'Testing...' : 'Test Connection'}
           </button>
           <button
             onClick={handleSave}
@@ -208,7 +311,7 @@ const ApiCredentialsPanel = () => {
             }`}
           >
             {isSaving ? (
-              <RefreshCw size={14} className="animate-spin" />
+              <Loader2 size={14} className="animate-spin" />
             ) : saveStatus === 'success' ? (
               <CheckCircle size={14} />
             ) : saveStatus === 'error' ? (
@@ -220,10 +323,20 @@ const ApiCredentialsPanel = () => {
           </button>
         </div>
 
-        {saveStatus === 'error' && (
-          <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-            <AlertCircle size={12} />
-            Failed to save credentials. Please check your inputs.
+        {testStatus !== 'idle' && (
+          <div className={`p-2 rounded text-xs flex items-center gap-1 ${
+            testStatus === 'success' 
+              ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+              : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+          }`}>
+            {testStatus === 'success' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+            {testMessage}
+            {testStatus === 'success' && balance && (
+              <span className="ml-2 font-semibold">Balance: {balance}</span>
+            )}
+            {testStatus === 'success' && uid && (
+              <span className="ml-2 font-semibold">UID: {uid}</span>
+            )}
           </div>
         )}
       </div>
@@ -233,18 +346,50 @@ const ApiCredentialsPanel = () => {
 
 // Symbol Selector Panel
 const SymbolSelectorPanel = () => {
-  const [symbols, setSymbols] = useState<SymbolConfig[]>([
-    { symbol: 'BTCUSDT', enabled: true, baseAsset: 'BTC', quoteAsset: 'USDT' },
-    { symbol: 'ETHUSDT', enabled: true, baseAsset: 'ETH', quoteAsset: 'USDT' },
-    { symbol: 'BNBUSDT', enabled: true, baseAsset: 'BNB', quoteAsset: 'USDT' },
-    { symbol: 'SOLUSDT', enabled: true, baseAsset: 'SOL', quoteAsset: 'USDT' },
-    { symbol: 'XRPUSDT', enabled: false, baseAsset: 'XRP', quoteAsset: 'USDT' },
-    { symbol: 'ADAUSDT', enabled: false, baseAsset: 'ADA', quoteAsset: 'USDT' },
-    { symbol: 'DOGEUSDT', enabled: false, baseAsset: 'DOGE', quoteAsset: 'USDT' },
-    { symbol: 'DOTUSDT', enabled: false, baseAsset: 'DOT', quoteAsset: 'USDT' },
-  ]);
+  const [symbols, setSymbols] = useState<SymbolConfig[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectAll, setSelectAll] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchSymbols = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${BYBIT_API.mainnet}/v5/market/tickers?category=linear`);
+      const data = await response.json();
+
+      if (data.retCode === 0 && data.result?.list) {
+        const tickers = data.result.list;
+        const defaultEnabled = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+        
+        const mappedSymbols: SymbolConfig[] = tickers
+          .filter((t: any) => t.symbol.endsWith('USDT'))
+          .slice(0, 30)
+          .map((t: any) => ({
+            symbol: t.symbol,
+            enabled: defaultEnabled.includes(t.symbol),
+            baseAsset: t.symbol.replace('USDT', ''),
+            quoteAsset: 'USDT',
+            price: parseFloat(t.lastPrice).toFixed(2),
+            volume24h: `$${(parseFloat(t.volume24h) / 1e6).toFixed(1)}M`,
+            change24h: `${(parseFloat(t.price24hPcnt) * 100).toFixed(2)}%`,
+          }));
+
+        setSymbols(mappedSymbols);
+      } else {
+        throw new Error(data.retMsg || 'Failed to fetch symbols');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load symbols');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSymbols();
+  }, [fetchSymbols]);
 
   const toggleSymbol = (symbol: string) => {
     setSymbols(prev => prev.map(s => 
@@ -253,9 +398,8 @@ const SymbolSelectorPanel = () => {
   };
 
   const toggleAll = () => {
-    const newState = !selectAll;
-    setSelectAll(newState);
-    setSymbols(prev => prev.map(s => ({ ...s, enabled: newState })));
+    const allEnabled = symbols.every(s => s.enabled);
+    setSymbols(prev => prev.map(s => ({ ...s, enabled: !allEnabled })));
   };
 
   const filteredSymbols = symbols.filter(s => 
@@ -263,6 +407,17 @@ const SymbolSelectorPanel = () => {
   );
 
   const enabledCount = symbols.filter(s => s.enabled).length;
+
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+        <div className="flex items-center justify-center py-8">
+          <Loader2 size={24} className="animate-spin text-blue-600" />
+          <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Loading symbols...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5 space-y-4">
@@ -275,6 +430,16 @@ const SymbolSelectorPanel = () => {
           {enabledCount} / {symbols.length} enabled
         </span>
       </div>
+
+      {error && (
+        <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+          <AlertCircle size={12} />
+          {error}
+          <button onClick={fetchSymbols} className="ml-auto text-blue-600 hover:underline">
+            Retry
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <div className="flex-1 relative">
@@ -290,7 +455,7 @@ const SymbolSelectorPanel = () => {
           onClick={toggleAll}
           className="px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
-          {selectAll ? 'Deselect All' : 'Select All'}
+          {symbols.every(s => s.enabled) ? 'Deselect All' : 'Select All'}
         </button>
       </div>
 
@@ -299,22 +464,32 @@ const SymbolSelectorPanel = () => {
           <button
             key={symbol.symbol}
             onClick={() => toggleSymbol(symbol.symbol)}
-            className={`flex items-center justify-between p-2 rounded-lg border transition-all ${
+            className={`flex flex-col items-start p-2 rounded-lg border transition-all ${
               symbol.enabled
                 ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
                 : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700'
             }`}
           >
-            <span className={`text-xs font-medium ${
-              symbol.enabled ? 'text-blue-700 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'
-            }`}>
-              {symbol.symbol}
-            </span>
-            {symbol.enabled ? (
-              <CheckCircle size={12} className="text-blue-600 dark:text-blue-400" />
-            ) : (
-              <div className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600" />
-            )}
+            <div className="flex items-center justify-between w-full">
+              <span className={`text-xs font-medium ${
+                symbol.enabled ? 'text-blue-700 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'
+              }`}>
+                {symbol.symbol}
+              </span>
+              {symbol.enabled ? (
+                <CheckCircle size={12} className="text-blue-600 dark:text-blue-400" />
+              ) : (
+                <div className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600" />
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[9px] text-gray-500 dark:text-gray-400">{symbol.price}</span>
+              <span className={`text-[9px] ${
+                parseFloat(symbol.change24h) >= 0 ? 'text-green-600' : 'text-red-600'
+              }`}>
+                {symbol.change24h}
+              </span>
+            </div>
           </button>
         ))}
       </div>
@@ -330,7 +505,7 @@ const SymbolSelectorPanel = () => {
 // WebSocket Config Panel
 const WebSocketConfigPanel = () => {
   const [config, setConfig] = useState<WebSocketConfig>({
-    url: 'wss://stream.binance.com:9443/ws',
+    url: BYBIT_WS.mainnet,
     reconnectDelay: 5000,
     maxReconnectAttempts: 10,
     heartbeatInterval: 30000,
@@ -339,24 +514,85 @@ const WebSocketConfigPanel = () => {
   });
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [logs, setLogs] = useState<string[]>([]);
+  const [messageCount, setMessageCount] = useState(0);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const addLog = (message: string) => {
+    setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-20));
+  };
 
   const connect = async () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      disconnect();
+      return;
+    }
+
     setStatus('connecting');
     addLog('Connecting to WebSocket...');
-    
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setStatus('connected');
-      addLog('✅ Connected successfully');
-      
-      // Simulate messages
-      const interval = setInterval(() => {
-        if (status === 'connected') {
-          addLog(`📩 Received data: ${Math.random().toFixed(4)}`);
+      const ws = new WebSocket(config.url);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setStatus('connected');
+        setMessageCount(0);
+        addLog('✅ Connected successfully');
+        
+        // Subscribe to ticker updates
+        ws.send(JSON.stringify({
+          op: 'subscribe',
+          args: ['tickers.BTCUSDT', 'tickers.ETHUSDT', 'tickers.SOLUSDT']
+        }));
+        addLog('📡 Subscribed to ticker updates');
+
+        // Start heartbeat
+        if (heartbeatIntervalRef.current) {
+          clearInterval(heartbeatIntervalRef.current);
         }
-      }, 5000);
-      
-      return () => clearInterval(interval);
+        heartbeatIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ op: 'ping' }));
+          }
+        }, config.heartbeatInterval);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setMessageCount(prev => prev + 1);
+          
+          if (data.topic) {
+            addLog(`📩 Received ${data.topic} data`);
+          } else if (data.op === 'pong') {
+            // Heartbeat response
+          }
+        } catch (e) {
+          // Ignore parse errors for binary data
+        }
+      };
+
+      ws.onerror = (error) => {
+        setStatus('error');
+        addLog('❌ WebSocket error occurred');
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        setStatus('idle');
+        addLog('🔌 Disconnected');
+        
+        // Attempt reconnect
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = setTimeout(() => {
+          addLog('🔄 Attempting to reconnect...');
+          connect();
+        }, config.reconnectDelay);
+      };
     } catch (error) {
       setStatus('error');
       addLog('❌ Connection failed');
@@ -364,13 +600,28 @@ const WebSocketConfigPanel = () => {
   };
 
   const disconnect = () => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
     setStatus('idle');
     addLog('🔌 Disconnected');
   };
 
-  const addLog = (message: string) => {
-    setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-20));
-  };
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      disconnect();
+    };
+  }, []);
 
   return (
     <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5 space-y-4">
@@ -390,11 +641,14 @@ const WebSocketConfigPanel = () => {
               : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
           }`}>
             {status === 'connected' && <CheckCircle size={10} />}
-            {status === 'connecting' && <RefreshCw size={10} className="animate-spin" />}
+            {status === 'connecting' && <Loader2 size={10} className="animate-spin" />}
             {status === 'error' && <XCircle size={10} />}
             {status === 'idle' && <WifiOff size={10} />}
             {status.charAt(0).toUpperCase() + status.slice(1)}
           </span>
+          {status === 'connected' && (
+            <span className="text-[10px] text-gray-500">Messages: {messageCount}</span>
+          )}
         </div>
       </div>
 
@@ -403,12 +657,14 @@ const WebSocketConfigPanel = () => {
           <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
             WebSocket URL
           </label>
-          <input
-            type="text"
+          <select
             value={config.url}
             onChange={(e) => setConfig({ ...config, url: e.target.value })}
             className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
-          />
+          >
+            <option value={BYBIT_WS.mainnet}>Mainnet: {BYBIT_WS.mainnet}</option>
+            <option value={BYBIT_WS.testnet}>Testnet: {BYBIT_WS.testnet}</option>
+          </select>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -463,28 +719,25 @@ const WebSocketConfigPanel = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {status === 'connected' ? (
-            <button
-              onClick={disconnect}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-            >
+          <button
+            onClick={connect}
+            disabled={status === 'connecting'}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+              status === 'connected'
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
+            }`}
+          >
+            {status === 'connecting' ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : status === 'connected' ? (
               <WifiOff size={14} />
-              Disconnect
-            </button>
-          ) : (
-            <button
-              onClick={connect}
-              disabled={status === 'connecting'}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {status === 'connecting' ? (
-                <RefreshCw size={14} className="animate-spin" />
-              ) : (
-                <Wifi size={14} />
-              )}
-              {status === 'connecting' ? 'Connecting...' : 'Connect'}
-            </button>
-          )}
+            ) : (
+              <Wifi size={14} />
+            )}
+            {status === 'connected' ? 'Disconnect' : 
+             status === 'connecting' ? 'Connecting...' : 'Connect'}
+          </button>
         </div>
 
         {logs.length > 0 && (
@@ -505,31 +758,55 @@ const WebSocketConfigPanel = () => {
 const ConnectionHealthPanel = () => {
   const [health, setHealth] = useState<ConnectionHealth>({
     status: 'connected',
-    latency: 45,
-    messagesReceived: 1234,
-    messagesSent: 567,
-    connectionUptime: '2h 15m 32s',
-    reconnectAttempts: 2,
-    lastMessage: '2024-01-15 14:23:45',
+    latency: 0,
+    messagesReceived: 0,
+    messagesSent: 0,
+    connectionUptime: '0h 0m 0s',
+    reconnectAttempts: 0,
+    lastMessage: '-',
     quality: 'excellent',
   });
+  const [startTime] = useState(Date.now());
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const checkHealth = useCallback(async () => {
+    try {
+      const start = Date.now();
+      const response = await fetch(`${BYBIT_API.mainnet}/v5/market/time`);
+      const data = await response.json();
+      const latency = Date.now() - start;
+
+      if (data.retCode === 0) {
+        const uptime = (Date.now() - startTime) / 1000;
+        const quality: ConnectionHealth['quality'] = 
+          latency < 100 ? 'excellent' :
+          latency < 200 ? 'good' :
+          latency < 400 ? 'fair' : 'poor';
+
+        setHealth(prev => ({
+          ...prev,
+          status: 'connected',
+          latency,
+          quality,
+          connectionUptime: formatTime(uptime),
+          lastMessage: new Date().toLocaleString(),
+          messagesReceived: prev.messagesReceived + 1,
+        }));
+      } else {
+        setHealth(prev => ({ ...prev, status: 'error' }));
+      }
+    } catch (error) {
+      setHealth(prev => ({ ...prev, status: 'error', latency: 999 }));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [startTime]);
 
   useEffect(() => {
-    if (!autoRefresh) return;
-
-    const interval = setInterval(() => {
-      setHealth(prev => ({
-        ...prev,
-        messagesReceived: prev.messagesReceived + Math.floor(Math.random() * 10),
-        latency: 30 + Math.random() * 50,
-        connectionUptime: prev.connectionUptime,
-      }));
-    }, 5000);
-
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [checkHealth]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -550,6 +827,17 @@ const ConnectionHealthPanel = () => {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
+        <div className="flex items-center justify-center py-8">
+          <Loader2 size={24} className="animate-spin text-blue-600" />
+          <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Checking connection...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -557,23 +845,12 @@ const ConnectionHealthPanel = () => {
           <Activity size={16} className="text-green-600 dark:text-green-400" />
           Connection Health
         </h3>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-[10px] text-gray-500 dark:text-gray-400">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
-            />
-            Auto-refresh
-          </label>
-          <button 
-            onClick={() => setHealth(prev => ({ ...prev, status: 'connected' }))}
-            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-          >
-            <RefreshCw size={14} />
-          </button>
-        </div>
+        <button 
+          onClick={checkHealth}
+          className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+        >
+          <RefreshCw size={14} />
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -589,7 +866,7 @@ const ConnectionHealthPanel = () => {
           <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
             <div className="text-xs text-gray-500 dark:text-gray-400">Latency</div>
             <div className="text-sm font-semibold text-gray-900 dark:text-white">
-              {Math.round(health.latency)}ms
+              {health.latency}ms
             </div>
           </div>
           <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
@@ -642,7 +919,7 @@ const ConnectionHealthPanel = () => {
 
 // ============== MAIN PAGE ==============
 export default function SettingsPage() {
-  const [bybitLink, setBybitLink] = useState('https://www.bybit.com/app/user/api-management');
+  const bybitLink = 'https://www.bybit.com/app/user/api-management';
 
   return (
     <AppLayout>

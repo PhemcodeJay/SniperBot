@@ -1,3 +1,4 @@
+// ConnectionHealthPanel.tsx
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -14,14 +15,61 @@ interface EndpointHealth {
   latency: number | null;
   lastChecked: string | null;
   note?: string;
+  url: string;
 }
 
 const INITIAL_ENDPOINTS: EndpointHealth[] = [
-  { id: 'rest_testnet', label: 'REST API (Testnet)', endpoint: 'api-testnet.bybit.com', mode: 'paper', status: 'checking', latency: null, lastChecked: null },
-  { id: 'ws_testnet', label: 'WebSocket (Testnet)', endpoint: 'stream-testnet.bybit.com', mode: 'paper', status: 'checking', latency: null, lastChecked: null },
-  { id: 'rest_mainnet', label: 'REST API (Mainnet)', endpoint: 'api.bybit.com', mode: 'live', status: 'checking', latency: null, lastChecked: null },
-  { id: 'ws_mainnet', label: 'WebSocket (Mainnet)', endpoint: 'stream.bybit.com', mode: 'live', status: 'checking', latency: null, lastChecked: null },
-  { id: 'time_sync', label: 'Server Time Sync', endpoint: 'api.bybit.com/v5/market/time', mode: 'both', status: 'checking', latency: null, lastChecked: null, note: 'Drift < 1000ms required' },
+  { 
+    id: 'rest_testnet', 
+    label: 'REST API (Testnet)', 
+    endpoint: 'api-testnet.bybit.com', 
+    mode: 'paper', 
+    status: 'checking', 
+    latency: null, 
+    lastChecked: null,
+    url: 'https://api-testnet.bybit.com/v5/market/time'
+  },
+  { 
+    id: 'ws_testnet', 
+    label: 'WebSocket (Testnet)', 
+    endpoint: 'stream-testnet.bybit.com', 
+    mode: 'paper', 
+    status: 'checking', 
+    latency: null, 
+    lastChecked: null,
+    url: 'wss://stream-testnet.bybit.com/v5/public/spot'
+  },
+  { 
+    id: 'rest_mainnet', 
+    label: 'REST API (Mainnet)', 
+    endpoint: 'api.bybit.com', 
+    mode: 'live', 
+    status: 'checking', 
+    latency: null, 
+    lastChecked: null,
+    url: 'https://api.bybit.com/v5/market/time'
+  },
+  { 
+    id: 'ws_mainnet', 
+    label: 'WebSocket (Mainnet)', 
+    endpoint: 'stream.bybit.com', 
+    mode: 'live', 
+    status: 'checking', 
+    latency: null, 
+    lastChecked: null,
+    url: 'wss://stream.bybit.com/v5/public/spot'
+  },
+  { 
+    id: 'time_sync', 
+    label: 'Server Time Sync', 
+    endpoint: 'api.bybit.com/v5/market/time', 
+    mode: 'both', 
+    status: 'checking', 
+    latency: null, 
+    lastChecked: null, 
+    note: 'Drift < 1000ms required',
+    url: 'https://api.bybit.com/v5/market/time'
+  },
 ];
 
 const STATUS_CONFIG: Record<HealthStatus, { icon: React.ElementType; color: string; bg: string; label: string }> = {
@@ -31,11 +79,63 @@ const STATUS_CONFIG: Record<HealthStatus, { icon: React.ElementType; color: stri
   checking: { icon: RefreshCw, color: 'text-muted-foreground', bg: 'bg-muted border-border', label: 'Checking' },
 };
 
-function simulateCheck(): { status: HealthStatus; latency: number } {
-  const r = Math.random();
-  if (r < 0.75) return { status: 'online', latency: Math.floor(40 + Math.random() * 120) };
-  if (r < 0.90) return { status: 'degraded', latency: Math.floor(300 + Math.random() * 400) };
-  return { status: 'offline', latency: 0 };
+async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: HealthStatus; latency: number }> {
+  const start = Date.now();
+  
+  try {
+    if (endpoint.url.startsWith('wss://')) {
+      // For WebSocket, we just check if we can establish a connection
+      return new Promise((resolve) => {
+        const ws = new WebSocket(endpoint.url);
+        const timeout = setTimeout(() => {
+          ws.close();
+          resolve({ status: 'offline', latency: Date.now() - start });
+        }, 5000);
+
+        ws.onopen = () => {
+          clearTimeout(timeout);
+          const latency = Date.now() - start;
+          ws.close();
+          resolve({ 
+            status: latency < 500 ? 'online' : 'degraded', 
+            latency 
+          });
+        };
+
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          resolve({ status: 'offline', latency: Date.now() - start });
+        };
+      });
+    } else {
+      // For REST endpoints, make a request
+      const response = await fetch(endpoint.url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(5000),
+      });
+      
+      const latency = Date.now() - start;
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Check if response is valid (Bybit returns retCode 0 for success)
+        if (data.retCode === 0) {
+          return { 
+            status: latency < 300 ? 'online' : 'degraded', 
+            latency 
+          };
+        }
+        return { status: 'degraded', latency };
+      }
+      return { status: 'offline', latency };
+    }
+  } catch (error) {
+    return { 
+      status: error instanceof DOMException && error.name === 'TimeoutError' ? 'offline' : 'offline', 
+      latency: Date.now() - start 
+    };
+  }
 }
 
 export default function ConnectionHealthPanel() {
@@ -47,20 +147,21 @@ export default function ConnectionHealthPanel() {
     setIsRunning(true);
     setEndpoints((prev) => prev.map((e) => ({ ...e, status: 'checking', latency: null })));
 
-    for (let i = 0; i < INITIAL_ENDPOINTS.length; i++) {
-      await new Promise((r) => setTimeout(r, 300 + Math.random() * 400));
-      const result = simulateCheck();
+    for (let i = 0; i < endpoints.length; i++) {
+      const result = await checkEndpointHealth(endpoints[i]);
       const now = new Date().toLocaleTimeString('en-US', { hour12: false });
       setEndpoints((prev) =>
         prev.map((e, idx) =>
           idx === i ? { ...e, status: result.status, latency: result.latency, lastChecked: now } : e
         )
       );
+      // Small delay between checks to avoid rate limiting
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     setLastFullCheck(new Date().toLocaleTimeString('en-US', { hour12: false }));
     setIsRunning(false);
-  }, []);
+  }, [endpoints]);
 
   useEffect(() => {
     runHealthCheck();
