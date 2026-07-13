@@ -107,8 +107,23 @@ const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'
 // Helper to generate Bybit signature
 const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
   const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
+  // Bybit signature format: timestamp + apiKey + recvWindow + params
+  const signaturePayload = timestamp + apiSecret + recvWindow + params;
+  return crypto.createHmac('sha256', apiSecret).update(signaturePayload).digest('hex');
+};
+
+// Helper to safely parse JSON response
+const safeJsonParse = async (response: Response) => {
+  try {
+    const text = await response.text();
+    if (!text || text.trim() === '') {
+      return null;
+    }
+    return JSON.parse(text);
+  } catch (error) {
+    console.error('Failed to parse JSON:', error);
+    return null;
+  }
 };
 
 // ============== COMPONENTS ==============
@@ -790,21 +805,26 @@ export default function LiveTradingDashboardPage() {
     };
   };
 
-  // Fetch Bybit balance
+  // Fetch Bybit balance with proper error handling
   const fetchBybitBalance = async (): Promise<number> => {
     try {
       const { apiKey, apiSecret, isTestnet } = getApiCredentials();
       
       if (!apiKey || !apiSecret) {
-        return 100; // Default paper balance
+        return 100;
       }
 
       const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
       const timestamp = Date.now().toString();
       const recvWindow = '5000';
+      
+      // For GET requests, params is empty string
       const params = '';
       
-      const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+      // Generate signature correctly
+      const signaturePayload = timestamp + apiKey + recvWindow + params;
+      const crypto = require('crypto');
+      const signature = crypto.createHmac('sha256', apiSecret).update(signaturePayload).digest('hex');
       
       const response = await fetch(`${baseUrl}/v5/account/wallet-balance`, {
         method: 'GET',
@@ -816,9 +836,9 @@ export default function LiveTradingDashboardPage() {
         },
       });
 
-      const data = await response.json();
+      const data = await safeJsonParse(response);
       
-      if (data.retCode === 0 && data.result) {
+      if (data && data.retCode === 0 && data.result) {
         const wallet = data.result.list?.[0];
         const totalEquity = parseFloat(wallet?.totalEquity || '0');
         return totalEquity > 0 ? totalEquity : 100;
@@ -850,9 +870,11 @@ export default function LiveTradingDashboardPage() {
       
       // Step 1: Set leverage
       const leverageParams = `category=linear&symbol=${symbol}&buyLeverage=${leverage}&sellLeverage=${leverage}`;
-      const leverageSignature = generateSignature(apiSecret, timestamp, recvWindow, leverageParams);
+      const leverageSignaturePayload = timestamp + apiKey + recvWindow + leverageParams;
+      const crypto = require('crypto');
+      const leverageSignature = crypto.createHmac('sha256', apiSecret).update(leverageSignaturePayload).digest('hex');
       
-      await fetch(`${baseUrl}/v5/position/set-leverage`, {
+      const leverageResponse = await fetch(`${baseUrl}/v5/position/set-leverage`, {
         method: 'POST',
         headers: {
           'X-BAPI-API-KEY': apiKey,
@@ -869,10 +891,18 @@ export default function LiveTradingDashboardPage() {
         }),
       });
 
+      const leverageData = await safeJsonParse(leverageResponse);
+      if (leverageData && leverageData.retCode !== 0) {
+        setError(`Failed to set leverage: ${leverageData.retMsg || 'Unknown error'}`);
+        setIsExecuting(false);
+        return;
+      }
+
       // Step 2: Place the order
       const orderSide = side === 'LONG' ? 'Buy' : 'Sell';
       const orderParams = `category=linear&symbol=${symbol}&side=${orderSide}&orderType=Market&qty=${size}&timeInForce=GTC`;
-      const orderSignature = generateSignature(apiSecret, timestamp, recvWindow, orderParams);
+      const orderSignaturePayload = timestamp + apiKey + recvWindow + orderParams;
+      const orderSignature = crypto.createHmac('sha256', apiSecret).update(orderSignaturePayload).digest('hex');
       
       const orderResponse = await fetch(`${baseUrl}/v5/order/create`, {
         method: 'POST',
@@ -893,14 +923,14 @@ export default function LiveTradingDashboardPage() {
         }),
       });
 
-      const orderData = await orderResponse.json();
+      const orderData = await safeJsonParse(orderResponse);
       
-      if (orderData.retCode === 0) {
+      if (orderData && orderData.retCode === 0) {
         setError(`✅ Position opened: ${side} ${symbol}`);
         setTimeout(() => setError(null), 3000);
         await fetchAllData();
       } else {
-        setError(`❌ Order failed: ${orderData.retMsg}`);
+        setError(`❌ Order failed: ${orderData?.retMsg || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Error executing trade:', err);
@@ -926,7 +956,9 @@ export default function LiveTradingDashboardPage() {
       
       const side = position.side === 'LONG' ? 'Sell' : 'Buy';
       const params = `category=linear&symbol=${position.symbol}&side=${side}&orderType=Market&qty=${position.size}&timeInForce=GTC&positionIdx=${position.positionIdx || 0}`;
-      const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+      const signaturePayload = timestamp + apiKey + recvWindow + params;
+      const crypto = require('crypto');
+      const signature = crypto.createHmac('sha256', apiSecret).update(signaturePayload).digest('hex');
       
       const response = await fetch(`${baseUrl}/v5/order/create`, {
         method: 'POST',
@@ -948,14 +980,14 @@ export default function LiveTradingDashboardPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = await safeJsonParse(response);
       
-      if (data.retCode === 0) {
+      if (data && data.retCode === 0) {
         await fetchAllData();
         setError(`✅ Position closed: ${position.symbol}`);
         setTimeout(() => setError(null), 3000);
       } else {
-        setError(`❌ Close failed: ${data.retMsg}`);
+        setError(`❌ Close failed: ${data?.retMsg || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Error closing position:', err);
@@ -1004,58 +1036,65 @@ export default function LiveTradingDashboardPage() {
       
       // If API connected, fetch real positions
       if (hasApiKeys) {
-        const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
-        const timestamp = Date.now().toString();
-        const recvWindow = '5000';
-        const params = '';
-        const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-        
-        const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
-          method: 'GET',
-          headers: {
-            'X-BAPI-API-KEY': apiKey,
-            'X-BAPI-TIMESTAMP': timestamp,
-            'X-BAPI-SIGN': signature,
-            'X-BAPI-RECV-WINDOW': recvWindow,
-          },
-        });
-        
-        const positionsData = await positionsResponse.json();
-        
-        if (positionsData.retCode === 0 && positionsData.result?.list) {
-          positionsData.result.list.forEach((pos: any) => {
-            const size = parseFloat(pos.size);
-            if (size !== 0) {
-              const side = pos.side === 'Buy' ? 'LONG' : 'SHORT';
-              const entryPrice = parseFloat(pos.avgPrice);
-              const markPrice = parseFloat(pos.markPrice);
-              const pnl = parseFloat(pos.unrealisedPnl || 0);
-              const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
-              
-              openPositionsCount++;
-              totalEquity += pnl;
-              dailyPnl += pnl;
-              
-              newPositions.push({
-                id: `pos-${pos.symbol}-${pos.positionIdx}`,
-                symbol: pos.symbol,
-                side: side,
-                entryPrice: entryPrice,
-                currentPrice: markPrice,
-                size: Math.abs(size),
-                pnl: pnl,
-                pnlPct: pnlPct,
-                entryTime: new Date(parseInt(pos.createdTime)).toLocaleTimeString(),
-                duration: `${Math.floor((Date.now() - parseInt(pos.createdTime)) / 60000)}m`,
-                leverage: parseFloat(pos.leverage || 5),
-                liquidationPrice: parseFloat(pos.liqPrice || 0),
-                stopLoss: parseFloat(pos.stopLoss || 0),
-                takeProfit: parseFloat(pos.takeProfit || 0),
-                positionIdx: parseInt(pos.positionIdx || 0),
-                orderId: pos.orderId,
-              });
-            }
+        try {
+          const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+          const timestamp = Date.now().toString();
+          const recvWindow = '5000';
+          const params = '';
+          const signaturePayload = timestamp + apiKey + recvWindow + params;
+          const crypto = require('crypto');
+          const signature = crypto.createHmac('sha256', apiSecret).update(signaturePayload).digest('hex');
+          
+          const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
+            method: 'GET',
+            headers: {
+              'X-BAPI-API-KEY': apiKey,
+              'X-BAPI-TIMESTAMP': timestamp,
+              'X-BAPI-SIGN': signature,
+              'X-BAPI-RECV-WINDOW': recvWindow,
+            },
           });
+          
+          const positionsData = await safeJsonParse(positionsResponse);
+          
+          if (positionsData && positionsData.retCode === 0 && positionsData.result?.list) {
+            positionsData.result.list.forEach((pos: any) => {
+              const size = parseFloat(pos.size);
+              if (size !== 0) {
+                const side = pos.side === 'Buy' ? 'LONG' : 'SHORT';
+                const entryPrice = parseFloat(pos.avgPrice);
+                const markPrice = parseFloat(pos.markPrice);
+                const pnl = parseFloat(pos.unrealisedPnl || 0);
+                const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
+                
+                openPositionsCount++;
+                totalEquity += pnl;
+                dailyPnl += pnl;
+                
+                newPositions.push({
+                  id: `pos-${pos.symbol}-${pos.positionIdx}`,
+                  symbol: pos.symbol,
+                  side: side,
+                  entryPrice: entryPrice,
+                  currentPrice: markPrice,
+                  size: Math.abs(size),
+                  pnl: pnl,
+                  pnlPct: pnlPct,
+                  entryTime: new Date(parseInt(pos.createdTime)).toLocaleTimeString(),
+                  duration: `${Math.floor((Date.now() - parseInt(pos.createdTime)) / 60000)}m`,
+                  leverage: parseFloat(pos.leverage || 5),
+                  liquidationPrice: parseFloat(pos.liqPrice || 0),
+                  stopLoss: parseFloat(pos.stopLoss || 0),
+                  takeProfit: parseFloat(pos.takeProfit || 0),
+                  positionIdx: parseInt(pos.positionIdx || 0),
+                  orderId: pos.orderId,
+                });
+              }
+            });
+          }
+        } catch (err) {
+          console.error('Error fetching positions:', err);
+          // Continue with paper mode data
         }
       }
       
@@ -1082,7 +1121,7 @@ export default function LiveTradingDashboardPage() {
               const isLong = change24h > 0;
               const entryPrice = price * (1 + (Math.random() - 0.5) * 0.01);
               const pnlPct = (price - entryPrice) / entryPrice * 100 * (isLong ? 1 : -1);
-              const pnl = pnlPct * 0.1; // Smaller P&L for paper trading
+              const pnl = pnlPct * 0.1;
               
               newPositions.push({
                 id: `pos-${symbol}-${Date.now()}`,
@@ -1325,7 +1364,6 @@ export default function LiveTradingDashboardPage() {
       lastAction: `Switched to ${newMode} mode`,
       lastActionTime: new Date().toLocaleTimeString(),
     }));
-    // Refetch data with new mode
     fetchAllData();
   };
 
