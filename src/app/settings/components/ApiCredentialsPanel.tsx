@@ -1,4 +1,3 @@
-// ApiCredentialsPanel.tsx
 'use client';
 
 import React, { useState } from 'react';
@@ -27,7 +26,9 @@ const BYBIT_API = {
 // Helper to generate Bybit signature
 const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
   const crypto = require('crypto');
+  // Bybit signature format: timestamp + apiKey + recvWindow + params
   const paramStr = timestamp + apiSecret + recvWindow + params;
+  console.log('Signature payload:', paramStr);
   return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
 };
 
@@ -61,9 +62,18 @@ export default function ApiCredentialsPanel() {
     try {
       const timestamp = Date.now().toString();
       const recvWindow = '5000';
+      // For GET request without parameters, params is empty string
       const params = '';
 
       const signature = generateSignature(creds.apiSecret, timestamp, recvWindow, params);
+
+      console.log('Testing connection with:', {
+        url: `${BYBIT_API[mode]}/v5/account/wallet-balance`,
+        apiKey: creds.apiKey,
+        timestamp,
+        recvWindow,
+        signature,
+      });
 
       const response = await fetch(`${BYBIT_API[mode]}/v5/account/wallet-balance`, {
         method: 'GET',
@@ -77,6 +87,8 @@ export default function ApiCredentialsPanel() {
 
       const data = await response.json();
       const latency = Date.now() - start;
+
+      console.log('Response:', data);
 
       if (data.retCode === 0 && data.result) {
         const wallet = data.result.list?.[0];
@@ -96,9 +108,19 @@ export default function ApiCredentialsPanel() {
           },
         }));
       } else {
-        throw new Error(data.retMsg || 'Invalid credentials or API error');
+        // Handle specific error codes
+        let errorMessage = data.retMsg || 'Invalid credentials or API error';
+        if (data.retCode === 10005) {
+          errorMessage = 'API key not found. Please check your API key.';
+        } else if (data.retCode === 10006) {
+          errorMessage = 'Invalid API signature. Please check your API secret.';
+        } else if (data.retCode === 10003) {
+          errorMessage = 'Too many requests. Please try again later.';
+        }
+        throw new Error(errorMessage);
       }
     } catch (error: any) {
+      console.error('Connection test error:', error);
       const latency = Date.now() - start;
       setTestResult((prev) => ({
         ...prev,
