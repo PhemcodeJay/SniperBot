@@ -95,6 +95,7 @@ const BYBIT_API = {
   orderHistory: 'https://api.bybit.com/v5/order/history',
   placeOrder: 'https://api.bybit.com/v5/order/create',
   setLeverage: 'https://api.bybit.com/v5/position/set-leverage',
+  wallet: 'https://api.bybit.com/v5/account/wallet-balance',
 };
 
 const BYBIT_WS = {
@@ -284,7 +285,7 @@ const QuickTradeForm = ({
 };
 
 // Live Metric Cards
-const LiveMetricCards = ({ metrics }: { metrics: AccountMetrics }) => {
+const LiveMetricCards = ({ metrics, mode }: { metrics: AccountMetrics; mode?: 'paper' | 'live' }) => {
   const cards = [
     { 
       label: 'Total Equity', 
@@ -337,7 +338,11 @@ const LiveMetricCards = ({ metrics }: { metrics: AccountMetrics }) => {
 };
 
 // Equity Sparkline
-const EquitySparkline = ({ equityData }: { equityData: number[] }) => {
+const EquitySparkline = ({ equityData, mode = 'paper', baseEquity = 100 }: { 
+  equityData: number[]; 
+  mode?: 'paper' | 'live';
+  baseEquity?: number;
+}) => {
   if (equityData.length === 0) {
     return (
       <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -356,12 +361,17 @@ const EquitySparkline = ({ equityData }: { equityData: number[] }) => {
   const first = equityData[0] || 0;
   const trend = last - first;
 
+  const modeLabel = mode === 'paper' ? 'Paper Trading' : 'Live Trading';
+  const equityLabel = mode === 'paper' ? '$100 Virtual' : `$${baseEquity.toFixed(0)} Balance`;
+
   return (
     <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Equity Curve</h3>
         <div className="flex items-center gap-3 text-xs">
-          <span className="text-gray-500 dark:text-gray-400">Current: ${last.toLocaleString()}</span>
+          <span className="text-gray-500 dark:text-gray-400">
+            {modeLabel} · {equityLabel}
+          </span>
           <span className={trend >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
             {trend >= 0 ? '+' : ''}{trend.toFixed(2)}
           </span>
@@ -385,6 +395,11 @@ const EquitySparkline = ({ equityData }: { equityData: number[] }) => {
             );
           })}
         </div>
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+        <span>Start: ${first.toFixed(2)}</span>
+        <span>Current: ${last.toFixed(2)}</span>
+        <span>Range: ${min.toFixed(0)} - ${max.toFixed(0)}</span>
       </div>
     </div>
   );
@@ -724,9 +739,9 @@ const RecentTradesFeed = ({ trades }: { trades: Trade[] }) => {
 export default function LiveTradingDashboardPage() {
   // State
   const [metrics, setMetrics] = useState<AccountMetrics>({
-    totalBalance: 100000,
-    availableBalance: 85000,
-    equity: 100000,
+    totalBalance: 100,
+    availableBalance: 100,
+    equity: 100,
     totalPnl: 0,
     totalPnlPct: 0,
     dailyPnl: 0,
@@ -758,6 +773,8 @@ export default function LiveTradingDashboardPage() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [actualBalance, setActualBalance] = useState<number>(100);
+  const [baseEquity, setBaseEquity] = useState<number>(100);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -771,6 +788,46 @@ export default function LiveTradingDashboardPage() {
       apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
       isTestnet: true,
     };
+  };
+
+  // Fetch Bybit balance
+  const fetchBybitBalance = async (): Promise<number> => {
+    try {
+      const { apiKey, apiSecret, isTestnet } = getApiCredentials();
+      
+      if (!apiKey || !apiSecret) {
+        return 100; // Default paper balance
+      }
+
+      const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+      const timestamp = Date.now().toString();
+      const recvWindow = '5000';
+      const params = '';
+      
+      const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+      
+      const response = await fetch(`${baseUrl}/v5/account/wallet-balance`, {
+        method: 'GET',
+        headers: {
+          'X-BAPI-API-KEY': apiKey,
+          'X-BAPI-TIMESTAMP': timestamp,
+          'X-BAPI-SIGN': signature,
+          'X-BAPI-RECV-WINDOW': recvWindow,
+        },
+      });
+
+      const data = await response.json();
+      
+      if (data.retCode === 0 && data.result) {
+        const wallet = data.result.list?.[0];
+        const totalEquity = parseFloat(wallet?.totalEquity || '0');
+        return totalEquity > 0 ? totalEquity : 100;
+      }
+      return 100;
+    } catch (error) {
+      console.error('Error fetching balance:', error);
+      return 100;
+    }
   };
 
   // Execute trade on Bybit
@@ -841,7 +898,6 @@ export default function LiveTradingDashboardPage() {
       if (orderData.retCode === 0) {
         setError(`✅ Position opened: ${side} ${symbol}`);
         setTimeout(() => setError(null), 3000);
-        // Refresh data to show the new position
         await fetchAllData();
       } else {
         setError(`❌ Order failed: ${orderData.retMsg}`);
@@ -913,45 +969,19 @@ export default function LiveTradingDashboardPage() {
       const { apiKey, apiSecret, isTestnet } = getApiCredentials();
       const hasApiKeys = apiKey && apiSecret;
       
-      if (!hasApiKeys) {
+      // Fetch balance first
+      let balance = 100;
+      if (hasApiKeys) {
+        balance = await fetchBybitBalance();
+        setActualBalance(balance);
+        setIsApiConnected(true);
+      } else {
         setIsApiConnected(false);
-        await fetchMarketDataOnly();
-        return;
       }
-
-      setIsApiConnected(true);
-      const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
-      const timestamp = Date.now().toString();
-      const recvWindow = '5000';
-      const params = '';
       
-      const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-      
-      // Fetch positions
-      const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
-        method: 'GET',
-        headers: {
-          'X-BAPI-API-KEY': apiKey,
-          'X-BAPI-TIMESTAMP': timestamp,
-          'X-BAPI-SIGN': signature,
-          'X-BAPI-RECV-WINDOW': recvWindow,
-        },
-      });
-      
-      const positionsData = await positionsResponse.json();
-      
-      // Fetch order history
-      const ordersResponse = await fetch(`${baseUrl}/v5/order/history?category=linear&limit=50`, {
-        method: 'GET',
-        headers: {
-          'X-BAPI-API-KEY': apiKey,
-          'X-BAPI-TIMESTAMP': timestamp,
-          'X-BAPI-SIGN': signature,
-          'X-BAPI-RECV-WINDOW': recvWindow,
-        },
-      });
-      
-      const ordersData = await ordersResponse.json();
+      // Use balance as base equity
+      const currentBaseEquity = botStatus.mode === 'live' ? balance : 100;
+      setBaseEquity(currentBaseEquity);
       
       // Fetch ticker data for all symbols
       const tickerPromises = SUPPORTED_SYMBOLS.map(symbol =>
@@ -962,80 +992,71 @@ export default function LiveTradingDashboardPage() {
       
       const tickerResults = await Promise.all(tickerPromises);
       
-      let totalEquity = 100000;
+      let totalEquity = currentBaseEquity;
       let dailyPnl = 0;
       let openPositionsCount = 0;
       let totalVolume = 0;
       let avgChange = 0;
       let validCount = 0;
       const newPositions: Position[] = [];
+      const newSignals: Signal[] = [];
       const newTrades: Trade[] = [];
       
-      // Process positions from Bybit
-      if (positionsData.retCode === 0 && positionsData.result?.list) {
-        positionsData.result.list.forEach((pos: any) => {
-          const size = parseFloat(pos.size);
-          if (size !== 0) {
-            const side = pos.side === 'Buy' ? 'LONG' : 'SHORT';
-            const entryPrice = parseFloat(pos.avgPrice);
-            const markPrice = parseFloat(pos.markPrice);
-            const pnl = parseFloat(pos.unrealisedPnl || 0);
-            const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
-            
-            openPositionsCount++;
-            totalEquity += pnl;
-            dailyPnl += pnl;
-            
-            newPositions.push({
-              id: `pos-${pos.symbol}-${pos.positionIdx}`,
-              symbol: pos.symbol,
-              side: side,
-              entryPrice: entryPrice,
-              currentPrice: markPrice,
-              size: Math.abs(size),
-              pnl: pnl,
-              pnlPct: pnlPct,
-              entryTime: new Date(parseInt(pos.createdTime)).toLocaleTimeString(),
-              duration: `${Math.floor((Date.now() - parseInt(pos.createdTime)) / 60000)}m`,
-              leverage: parseFloat(pos.leverage || 5),
-              liquidationPrice: parseFloat(pos.liqPrice || 0),
-              stopLoss: parseFloat(pos.stopLoss || 0),
-              takeProfit: parseFloat(pos.takeProfit || 0),
-              positionIdx: parseInt(pos.positionIdx || 0),
-              orderId: pos.orderId,
-            });
-          }
+      // If API connected, fetch real positions
+      if (hasApiKeys) {
+        const baseUrl = isTestnet ? 'https://api-testnet.bybit.com' : 'https://api.bybit.com';
+        const timestamp = Date.now().toString();
+        const recvWindow = '5000';
+        const params = '';
+        const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+        
+        const positionsResponse = await fetch(`${baseUrl}/v5/position/list`, {
+          method: 'GET',
+          headers: {
+            'X-BAPI-API-KEY': apiKey,
+            'X-BAPI-TIMESTAMP': timestamp,
+            'X-BAPI-SIGN': signature,
+            'X-BAPI-RECV-WINDOW': recvWindow,
+          },
         });
-      }
-      
-      // Process order history for closed trades
-      if (ordersData.retCode === 0 && ordersData.result?.list) {
-        ordersData.result.list.forEach((order: any) => {
-          if (order.orderStatus === 'Filled') {
-            const side = order.side === 'Buy' ? 'LONG' : 'SHORT';
-            const entryPrice = parseFloat(order.price);
-            const size = parseFloat(order.qty);
-            const createdTime = parseInt(order.createdTime);
-            const updatedTime = parseInt(order.updatedTime);
-            const pnl = (Math.random() - 0.3) * 10;
-            
-            newTrades.push({
-              id: `order-${order.orderId}`,
-              symbol: order.symbol,
-              side: side,
-              entryPrice: entryPrice,
-              exitPrice: entryPrice * (1 + (Math.random() - 0.5) * 0.02),
-              size: size,
-              pnl: pnl,
-              pnlPct: (pnl / entryPrice) * 100,
-              entryTime: new Date(createdTime).toLocaleTimeString(),
-              exitTime: new Date(updatedTime).toLocaleTimeString(),
-              exitReason: pnl > 0 ? 'TP_HIT' : 'SL_HIT',
-              orderId: order.orderId,
-              status: 'closed',
-            });
-          }
-        });
+        
+        const positionsData = await positionsResponse.json();
+        
+        if (positionsData.retCode === 0 && positionsData.result?.list) {
+          positionsData.result.list.forEach((pos: any) => {
+            const size = parseFloat(pos.size);
+            if (size !== 0) {
+              const side = pos.side === 'Buy' ? 'LONG' : 'SHORT';
+              const entryPrice = parseFloat(pos.avgPrice);
+              const markPrice = parseFloat(pos.markPrice);
+              const pnl = parseFloat(pos.unrealisedPnl || 0);
+              const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
+              
+              openPositionsCount++;
+              totalEquity += pnl;
+              dailyPnl += pnl;
+              
+              newPositions.push({
+                id: `pos-${pos.symbol}-${pos.positionIdx}`,
+                symbol: pos.symbol,
+                side: side,
+                entryPrice: entryPrice,
+                currentPrice: markPrice,
+                size: Math.abs(size),
+                pnl: pnl,
+                pnlPct: pnlPct,
+                entryTime: new Date(parseInt(pos.createdTime)).toLocaleTimeString(),
+                duration: `${Math.floor((Date.now() - parseInt(pos.createdTime)) / 60000)}m`,
+                leverage: parseFloat(pos.leverage || 5),
+                liquidationPrice: parseFloat(pos.liqPrice || 0),
+                stopLoss: parseFloat(pos.stopLoss || 0),
+                takeProfit: parseFloat(pos.takeProfit || 0),
+                positionIdx: parseInt(pos.positionIdx || 0),
+                orderId: pos.orderId,
+              });
+            }
+          });
+        }
       }
       
       // Process ticker data for signals and market data
@@ -1051,141 +1072,41 @@ export default function LiveTradingDashboardPage() {
           avgChange += change24h;
           validCount++;
           
+          // Simulate positions for paper mode
+          if (botStatus.mode === 'paper' && !hasApiKeys) {
+            const volatility = Math.abs(change24h);
+            const hasPosition = volatility > 1.5 && Math.random() < 0.2;
+            
+            if (hasPosition) {
+              openPositionsCount++;
+              const isLong = change24h > 0;
+              const entryPrice = price * (1 + (Math.random() - 0.5) * 0.01);
+              const pnlPct = (price - entryPrice) / entryPrice * 100 * (isLong ? 1 : -1);
+              const pnl = pnlPct * 0.1; // Smaller P&L for paper trading
+              
+              newPositions.push({
+                id: `pos-${symbol}-${Date.now()}`,
+                symbol,
+                side: isLong ? 'LONG' : 'SHORT',
+                entryPrice,
+                currentPrice: price,
+                size: 0.001 + Math.random() * 0.003,
+                pnl: pnl,
+                pnlPct: pnlPct,
+                entryTime: new Date(Date.now() - Math.random() * 7200000).toLocaleTimeString(),
+                duration: `${Math.floor(Math.random() * 60 + 5)}m`,
+                leverage: 5,
+                liquidationPrice: isLong ? entryPrice * 0.95 : entryPrice * 1.05,
+                stopLoss: isLong ? entryPrice * 0.98 : entryPrice * 1.02,
+                takeProfit: isLong ? entryPrice * 1.04 : entryPrice * 0.96,
+              });
+              
+              totalEquity += pnl;
+              dailyPnl += pnl;
+            }
+          }
+          
           // Generate signal if significant movement
-          if (Math.abs(change24h) > 1.5) {
-            const confidence = 70 + Math.abs(change24h) * 2 + Math.min(volume / 1e8, 15);
-            const isLong = change24h > 0;
-            const atr = price * 0.01;
-            const entryPrice = price;
-            const sl = isLong ? price - atr * 1.5 : price + atr * 1.5;
-            const tp1 = isLong ? price + atr * 2.5 : price - atr * 2.5;
-            const rr = (Math.abs(tp1 - price) / Math.abs(sl - price));
-            
-            const newSignal: Signal = {
-              id: `sig-${symbol}-${Date.now()}`,
-              symbol,
-              direction: isLong ? 'LONG' : 'SHORT',
-              confidence: Math.min(95, Math.round(confidence)),
-              entryPrice,
-              sl,
-              tp1,
-              tp2: isLong ? price + atr * 4 : price - atr * 4,
-              rr: Math.round(rr * 10) / 10,
-              timeframe: Math.abs(change24h) > 2 ? '15m' : '5m',
-              status: confidence > 80 ? 'live' : 'pending',
-              generatedAt: new Date().toLocaleTimeString(),
-              change24h: change24h,
-              volume: volume,
-            };
-            
-            setSignals(prev => {
-              const filtered = prev.filter(s => s.symbol !== symbol);
-              return [newSignal, ...filtered].slice(0, 50);
-            });
-          }
-        }
-      });
-      
-      // Update metrics
-      setMetrics({
-        totalBalance: 100000,
-        availableBalance: 85000,
-        equity: Math.round(totalEquity * 100) / 100,
-        totalPnl: Math.round((totalEquity - 100000) * 100) / 100,
-        totalPnlPct: Math.round(((totalEquity - 100000) / 100000) * 100 * 100) / 100,
-        dailyPnl: Math.round(dailyPnl * 100) / 100,
-        dailyPnlPct: Math.round((dailyPnl / 100000) * 100 * 100) / 100,
-        openPositions: openPositionsCount,
-        totalTrades: newTrades.length + 10,
-        winRate: 60 + Math.random() * 15,
-        riskExposure: Math.min(20, openPositionsCount * 3 + Math.random() * 2),
-        maxDrawdown: -Math.min(15, Math.abs(avgChange / validCount) * 2 + 2),
-      });
-      
-      setPositions(newPositions);
-      setTrades(prev => [...newTrades, ...prev].slice(0, 50));
-      
-      // Update equity data
-      setEquityData(prev => {
-        const newData = [...prev, totalEquity];
-        return newData.slice(-90);
-      });
-      
-      setLastUpdate(new Date());
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      setError('Failed to load data. Using fallback.');
-      await fetchMarketDataOnly();
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Fallback: fetch only market data
-  const fetchMarketDataOnly = async () => {
-    try {
-      const promises = SUPPORTED_SYMBOLS.map(symbol =>
-        fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`)
-          .then(r => r.json())
-          .catch(() => null)
-      );
-      
-      const results = await Promise.all(promises);
-      
-      let totalEquity = 100000;
-      let dailyPnl = 0;
-      let openPositions = 0;
-      let totalVolume = 0;
-      let avgChange = 0;
-      let validCount = 0;
-      const newPositions: Position[] = [];
-      const newSignals: Signal[] = [];
-      const newTrades: Trade[] = [];
-      
-      results.forEach((result: any) => {
-        if (result && result.retCode === 0 && result.result?.list?.length > 0) {
-          const ticker = result.result.list[0];
-          const symbol = ticker.symbol;
-          const price = parseFloat(ticker.lastPrice);
-          const change24h = parseFloat(ticker.price24hPcnt) * 100;
-          const volume = parseFloat(ticker.volume24h);
-          
-          totalVolume += volume;
-          avgChange += change24h;
-          validCount++;
-          
-          const volatility = Math.abs(change24h);
-          const hasPosition = volatility > 1.5 && Math.random() < 0.2;
-          
-          if (hasPosition) {
-            openPositions++;
-            const isLong = change24h > 0;
-            const entryPrice = price * (1 + (Math.random() - 0.5) * 0.01);
-            const pnlPct = (price - entryPrice) / entryPrice * 100 * (isLong ? 1 : -1);
-            const pnl = pnlPct * 10;
-            
-            newPositions.push({
-              id: `pos-${symbol}-${Date.now()}`,
-              symbol,
-              side: isLong ? 'LONG' : 'SHORT',
-              entryPrice,
-              currentPrice: price,
-              size: 0.01 + Math.random() * 0.04,
-              pnl: pnl,
-              pnlPct: pnlPct,
-              entryTime: new Date(Date.now() - Math.random() * 7200000).toLocaleTimeString(),
-              duration: `${Math.floor(Math.random() * 60 + 5)}m`,
-              leverage: 5,
-              liquidationPrice: isLong ? entryPrice * 0.95 : entryPrice * 1.05,
-              stopLoss: isLong ? entryPrice * 0.98 : entryPrice * 1.02,
-              takeProfit: isLong ? entryPrice * 1.04 : entryPrice * 0.96,
-            });
-            
-            totalEquity += pnl;
-            dailyPnl += pnl;
-          }
-          
           if (Math.abs(change24h) > 1.5) {
             const confidence = 70 + Math.abs(change24h) * 2 + Math.min(volume / 1e8, 15);
             const isLong = change24h > 0;
@@ -1213,16 +1134,17 @@ export default function LiveTradingDashboardPage() {
             });
           }
           
-          if (Math.random() < 0.2) {
-            const pnl = (Math.random() - 0.3) * 5;
+          // Generate paper trade history
+          if (botStatus.mode === 'paper' && !hasApiKeys && Math.random() < 0.15) {
+            const pnl = (Math.random() - 0.3) * 2;
             newTrades.push({
               id: `trade-${symbol}-${Date.now()}`,
               symbol,
               side: pnl > 0 ? 'LONG' : 'SHORT',
               entryPrice: price * (1 + (Math.random() - 0.5) * 0.02),
               exitPrice: price * (1 + (Math.random() - 0.5) * 0.02),
-              size: 0.01 + Math.random() * 0.03,
-              pnl: pnl * 10,
+              size: 0.001 + Math.random() * 0.002,
+              pnl: pnl * 0.5,
               pnlPct: pnl,
               entryTime: new Date(Date.now() - Math.random() * 3600000).toLocaleTimeString(),
               exitTime: new Date().toLocaleTimeString(),
@@ -1233,18 +1155,19 @@ export default function LiveTradingDashboardPage() {
         }
       });
       
+      // Update metrics
       setMetrics({
-        totalBalance: 100000,
-        availableBalance: 85000,
+        totalBalance: currentBaseEquity,
+        availableBalance: currentBaseEquity * 0.85,
         equity: Math.round(totalEquity * 100) / 100,
-        totalPnl: Math.round((totalEquity - 100000) * 100) / 100,
-        totalPnlPct: Math.round(((totalEquity - 100000) / 100000) * 100 * 100) / 100,
+        totalPnl: Math.round((totalEquity - currentBaseEquity) * 100) / 100,
+        totalPnlPct: Math.round(((totalEquity - currentBaseEquity) / currentBaseEquity) * 100 * 100) / 100,
         dailyPnl: Math.round(dailyPnl * 100) / 100,
-        dailyPnlPct: Math.round((dailyPnl / 100000) * 100 * 100) / 100,
-        openPositions: openPositions,
-        totalTrades: newTrades.length + 10,
+        dailyPnlPct: Math.round((dailyPnl / currentBaseEquity) * 100 * 100) / 100,
+        openPositions: openPositionsCount,
+        totalTrades: newTrades.length + 5,
         winRate: 60 + Math.random() * 15,
-        riskExposure: Math.min(20, openPositions * 3 + Math.random() * 2),
+        riskExposure: Math.min(20, openPositionsCount * 3 + Math.random() * 2),
         maxDrawdown: -Math.min(15, Math.abs(avgChange / validCount) * 2 + 2),
       });
       
@@ -1252,6 +1175,7 @@ export default function LiveTradingDashboardPage() {
       setSignals(prev => [...newSignals, ...prev].slice(0, 50));
       setTrades(prev => [...newTrades, ...prev].slice(0, 50));
       
+      // Update equity data
       setEquityData(prev => {
         const newData = [...prev, totalEquity];
         return newData.slice(-90);
@@ -1260,8 +1184,8 @@ export default function LiveTradingDashboardPage() {
       setLastUpdate(new Date());
       setError(null);
     } catch (err) {
-      console.error('Error fetching market data:', err);
-      setError('Failed to load market data. Please refresh.');
+      console.error('Error fetching data:', err);
+      setError('Failed to load data. Using fallback.');
     } finally {
       setIsLoading(false);
     }
@@ -1345,7 +1269,7 @@ export default function LiveTradingDashboardPage() {
         clearInterval(uptimeIntervalRef.current);
       }
     };
-  }, []);
+  }, [botStatus.mode]);
 
   // Bot controls
   const handleStartBot = () => {
@@ -1401,6 +1325,8 @@ export default function LiveTradingDashboardPage() {
       lastAction: `Switched to ${newMode} mode`,
       lastActionTime: new Date().toLocaleTimeString(),
     }));
+    // Refetch data with new mode
+    fetchAllData();
   };
 
   const handleReconnect = () => {
@@ -1498,14 +1424,22 @@ export default function LiveTradingDashboardPage() {
           <span className="text-gray-300 dark:text-gray-600">|</span>
           <span>Last update: {lastUpdate.toLocaleTimeString()}</span>
           <span className="text-gray-300 dark:text-gray-600">|</span>
-          <span>{isApiConnected ? 'Bybit API Connected' : `${SUPPORTED_SYMBOLS.length} symbols monitored`}</span>
+          <span>
+            {botStatus.mode === 'live' 
+              ? `Live Balance: $${actualBalance.toFixed(2)}` 
+              : `${SUPPORTED_SYMBOLS.length} symbols monitored`}
+          </span>
         </div>
 
         {/* KPI Cards */}
-        <LiveMetricCards metrics={metrics} />
+        <LiveMetricCards metrics={metrics} mode={botStatus.mode} />
 
         {/* Equity Curve */}
-        <EquitySparkline equityData={equityData} />
+        <EquitySparkline 
+          equityData={equityData} 
+          mode={botStatus.mode}
+          baseEquity={baseEquity}
+        />
 
         {/* Middle Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

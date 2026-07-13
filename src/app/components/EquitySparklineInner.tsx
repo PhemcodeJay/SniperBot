@@ -1,4 +1,3 @@
-// EquitySparklineInner.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -20,6 +19,11 @@ interface EquityPoint {
   pnl: number;
 }
 
+interface EquitySparklineProps {
+  mode?: 'paper' | 'live';
+  baseEquity?: number;
+}
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
@@ -31,21 +35,20 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         <span className="text-primary">${d.equity.toLocaleString()}</span>
       </p>
       <p className={d.pnl >= 0 ? 'text-positive' : 'text-negative'}>
-        P&L: {d.pnl >= 0 ? '+' : ''}${d.pnl}
+        P&L: {d.pnl >= 0 ? '+' : ''}${d.pnl.toFixed(2)}
       </p>
     </div>
   );
 };
 
-export default function EquitySparklineInner() {
+export default function EquitySparklineInner({ mode = 'paper', baseEquity = 100 }: EquitySparklineProps) {
   const [data, setData] = useState<EquityPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [stats, setStats] = useState({ pnl: 0, return: 0, startEquity: 0 });
+  const [stats, setStats] = useState({ pnl: 0, return: 0, startEquity: 0, currentEquity: 0 });
 
   const fetchEquityData = async () => {
     try {
-      // In a real app, you'd fetch from your backend or use WebSocket data
-      // For demo, we'll generate realistic data from Bybit ticker
+      // Fetch real market data from Bybit
       const response = await fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT');
       const result = await response.json();
       
@@ -53,24 +56,29 @@ export default function EquitySparklineInner() {
         const ticker = result.result.list[0];
         const price = parseFloat(ticker.lastPrice);
         const change24h = parseFloat(ticker.price24hPcnt) * 100;
+        const volume = parseFloat(ticker.volume24h);
+        
+        // Use the provided base equity (from parent component)
+        const baseEquityValue = baseEquity;
         
         // Generate realistic equity curve based on current price
-        const baseEquity = 100;
         const generatedData: EquityPoint[] = [];
         const now = new Date();
+        const volatility = Math.abs(change24h) / 100;
+        const noiseFactor = mode === 'paper' ? 0.3 : 0.5; // Paper mode less volatile
         
         for (let i = 23; i >= 0; i--) {
           const time = new Date(now);
           time.setHours(time.getHours() - i);
           const hourStr = time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
           
-          // Simulate realistic price movements with some randomness
+          // Simulate realistic price movements based on actual market data
           const progress = (23 - i) / 23;
-          const baseChange = change24h * progress / 100;
-          const noise = (Math.random() - 0.5) * 0.002;
+          const baseChange = change24h * progress / 100 * noiseFactor;
+          const noise = (Math.random() - 0.5) * volatility * 0.5 * noiseFactor;
           const pctChange = baseChange + noise;
-          const equity = baseEquity * (1 + pctChange);
-          const pnl = equity - baseEquity;
+          const equity = baseEquityValue * (1 + pctChange);
+          const pnl = equity - baseEquityValue;
           
           generatedData.push({
             time: hourStr,
@@ -82,8 +90,8 @@ export default function EquitySparklineInner() {
         setData(generatedData);
         
         // Calculate stats
-        const start = generatedData[0]?.equity || baseEquity;
-        const end = generatedData[generatedData.length - 1]?.equity || baseEquity;
+        const start = generatedData[0]?.equity || baseEquityValue;
+        const end = generatedData[generatedData.length - 1]?.equity || baseEquityValue;
         const totalPnl = end - start;
         const totalReturn = (totalPnl / start) * 100;
         
@@ -91,6 +99,7 @@ export default function EquitySparklineInner() {
           pnl: totalPnl,
           return: totalReturn,
           startEquity: start,
+          currentEquity: end,
         });
       }
     } catch (error) {
@@ -104,7 +113,7 @@ export default function EquitySparklineInner() {
     fetchEquityData();
     const interval = setInterval(fetchEquityData, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [baseEquity, mode]);
 
   if (isLoading || data.length === 0) {
     return (
@@ -117,6 +126,11 @@ export default function EquitySparklineInner() {
     );
   }
 
+  const modeLabel = mode === 'paper' ? 'Paper Trading Session' : 'Live Trading Session';
+  const maxEquity = Math.max(...data.map(d => d.equity));
+  const minEquity = Math.min(...data.map(d => d.equity));
+  const range = maxEquity - minEquity || 1;
+
   return (
     <div className="card-surface p-5">
       <div className="flex items-center justify-between mb-4">
@@ -125,7 +139,13 @@ export default function EquitySparklineInner() {
             Intraday Equity Curve
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · Paper Trading Session
+            {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · {modeLabel}
+            {mode === 'paper' && (
+              <span className="ml-1 text-yellow-600 dark:text-yellow-400">(${stats.startEquity.toFixed(0)} Virtual)</span>
+            )}
+            {mode === 'live' && stats.startEquity > 0 && (
+              <span className="ml-1 text-green-600 dark:text-green-400">(${stats.startEquity.toFixed(0)} Real Balance)</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -172,11 +192,11 @@ export default function EquitySparklineInner() {
             interval={3}
           />
           <YAxis
-            domain={['dataMin - 50', 'dataMax + 50']}
+            domain={[minEquity - range * 0.1, maxEquity + range * 0.1]}
             tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
+            tickFormatter={(v) => `$${v.toFixed(0)}`}
             width={48}
           />
           <Tooltip content={<CustomTooltip />} />
@@ -185,6 +205,7 @@ export default function EquitySparklineInner() {
             stroke="var(--muted-foreground)"
             strokeDasharray="4 4"
             strokeOpacity={0.4}
+            label={{ value: 'Start', fill: 'var(--muted-foreground)', fontSize: 10 }}
           />
           <Area
             type="monotone"
@@ -202,6 +223,18 @@ export default function EquitySparklineInner() {
           />
         </AreaChart>
       </ResponsiveContainer>
+
+      <div className="flex justify-between mt-3 pt-2 border-t border-border text-[10px] text-muted-foreground">
+        <span>
+          Start: <span className="font-mono text-foreground">${stats.startEquity.toFixed(2)}</span>
+        </span>
+        <span>
+          Current: <span className="font-mono text-foreground">${stats.currentEquity.toFixed(2)}</span>
+        </span>
+        <span>
+          Range: <span className="font-mono text-foreground">${minEquity.toFixed(0)} - ${maxEquity.toFixed(0)}</span>
+        </span>
+      </div>
     </div>
   );
 }

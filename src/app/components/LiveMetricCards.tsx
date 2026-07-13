@@ -41,14 +41,6 @@ const BYBIT_API = {
   wallet: 'https://api.bybit.com/v5/account/wallet-balance',
 };
 
-// For demo purposes - in production, these should be stored securely
-// and never in client-side code
-const DEMO_CREDENTIALS = {
-  apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-  apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  isTestnet: true,
-};
-
 // Helper to generate Bybit signature
 const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
   const crypto = require('crypto');
@@ -143,13 +135,22 @@ export default function LiveMetricCards() {
   const [showBalance, setShowBalance] = useState(true);
   const [baseEquity, setBaseEquity] = useState<number>(100);
   const [isConnected, setIsConnected] = useState(false);
+  const [mode, setMode] = useState<'paper' | 'live'>('paper');
+
+  // Get API credentials
+  const getApiCredentials = () => {
+    return {
+      apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
+      apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
+      isTestnet: true,
+    };
+  };
 
   // Fetch Bybit balance
-  const fetchBybitBalance = async () => {
+  const fetchBybitBalance = async (): Promise<number | null> => {
     try {
-      const { apiKey, apiSecret, isTestnet } = DEMO_CREDENTIALS;
+      const { apiKey, apiSecret, isTestnet } = getApiCredentials();
       
-      // If no API credentials, use demo mode
       if (!apiKey || !apiSecret) {
         console.log('No API credentials found, using demo mode');
         return null;
@@ -180,8 +181,11 @@ export default function LiveMetricCards() {
       if (data.retCode === 0 && data.result) {
         const wallet = data.result.list?.[0];
         const totalEquity = parseFloat(wallet?.totalEquity || '0');
-        setIsConnected(true);
-        return totalEquity;
+        if (totalEquity > 0) {
+          setIsConnected(true);
+          return totalEquity;
+        }
+        return null;
       } else {
         console.error('Failed to fetch balance:', data.retMsg);
         return null;
@@ -198,22 +202,25 @@ export default function LiveMetricCards() {
       setIsLoading(true);
       setError(null);
       
-      // Fetch real balance from Bybit
-      let balance = await fetchBybitBalance();
+      // Determine which balance to use
+      let balance: number;
       
-      // If balance fetch failed or no credentials, use stored balance or default
-      if (!balance) {
-        const storedBalance = localStorage.getItem('bybit_balance');
-        if (storedBalance) {
-          balance = parseFloat(storedBalance);
+      if (mode === 'live') {
+        // Live mode - fetch real Bybit balance
+        const liveBalance = await fetchBybitBalance();
+        if (liveBalance && liveBalance > 0) {
+          balance = liveBalance;
+          setIsConnected(true);
         } else {
-          balance = 100; // Default demo balance
+          // Fallback to paper if live balance fails
+          balance = 100;
+          setIsConnected(false);
+          setMode('paper');
         }
-        setIsConnected(false);
       } else {
-        // Store balance in localStorage for demo mode
-        localStorage.setItem('bybit_balance', balance.toString());
-        setIsConnected(true);
+        // Paper mode - always $100 virtual
+        balance = 100;
+        setIsConnected(false);
       }
       
       setBaseEquity(balance);
@@ -229,12 +236,14 @@ export default function LiveMetricCards() {
         const volume = parseFloat(ticker.volume24h);
         
         // Calculate daily P&L based on price change
-        const dailyPnl = balance * (change24h / 100) * 0.3;
+        // For paper mode, use smaller multipliers to simulate realistic returns on $100
+        const volatility = Math.abs(change24h);
+        const multiplier = mode === 'paper' ? 0.5 : 1.0; // Paper mode is less volatile
+        const dailyPnl = balance * (change24h / 100) * 0.3 * multiplier;
         const currentEquity = balance + dailyPnl;
         
         // Calculate win rate based on market conditions
-        const volatility = Math.abs(change24h);
-        const winRate = Math.min(85, 60 + volatility * 1.5 + Math.random() * 5);
+        const winRate = Math.min(85, 55 + volatility * 1.5 + Math.random() * 5);
         const wins = Math.round((winRate / 100) * 15);
         const losses = 15 - wins;
         
@@ -255,18 +264,18 @@ export default function LiveMetricCards() {
             total: 15,
           },
           heat: {
-            pct: Math.min(8, 2 + volatility * 0.5 + Math.random() * 2),
-            positions: Math.floor(1 + Math.random() * 3),
+            pct: Math.min(8, 1 + volatility * 0.3 + Math.random() * 1.5),
+            positions: mode === 'paper' ? Math.floor(1 + Math.random() * 2) : Math.floor(1 + Math.random() * 3),
             max: 5,
           },
           sharpe: {
-            ratio: 1.5 + volatility * 0.1 + Math.random() * 0.5,
-            sortino: 2.0 + volatility * 0.1 + Math.random() * 0.5,
+            ratio: 1.2 + volatility * 0.08 + Math.random() * 0.4,
+            sortino: 1.8 + volatility * 0.08 + Math.random() * 0.4,
           },
           drawdown: {
-            used: Math.min(4, Math.abs(change24h) * 0.3 + Math.random() * 0.5),
+            used: Math.min(4, Math.abs(change24h) * 0.2 + Math.random() * 0.4),
             limit: 5.0,
-            remaining: 5.0 - Math.min(4, Math.abs(change24h) * 0.3 + Math.random() * 0.5),
+            remaining: 5.0 - Math.min(4, Math.abs(change24h) * 0.2 + Math.random() * 0.4),
           },
         });
       } else {
@@ -313,11 +322,21 @@ export default function LiveMetricCards() {
     }
   };
 
+  // Toggle between paper and live mode
+  const toggleMode = () => {
+    const newMode = mode === 'paper' ? 'live' : 'paper';
+    if (newMode === 'live' && !window.confirm('⚠️ WARNING: Switching to LIVE mode will use your real Bybit balance. Are you sure?')) {
+      return;
+    }
+    setMode(newMode);
+    fetchMetrics();
+  };
+
   useEffect(() => {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [mode]);
 
   // Format currency with optional hiding
   const formatCurrency = (value: number) => {
@@ -342,7 +361,7 @@ export default function LiveMetricCards() {
   const metricData: MetricCardProps[] = [
     {
       id: 'metric-equity',
-      title: `Account Equity ${isConnected ? '🟢' : '🟡'}`,
+      title: `Account Equity ${mode === 'live' ? (isConnected ? '🟢' : '🔴') : '📄'}`,
       value: formatCurrency(metrics.equity.value),
       subValue: `Balance: ${formatCurrency(metrics.equity.balance)} · Unrealized: ${metrics.equity.unrealized >= 0 ? '+' : ''}${formatCurrency(metrics.equity.unrealized)}`,
       change: `${(metrics.equity.value / metrics.equity.balance * 100 - 100).toFixed(2)}%`,
@@ -407,14 +426,55 @@ export default function LiveMetricCards() {
 
   return (
     <div className="space-y-4">
-      {/* Balance Controls */}
-      <div className="flex items-center justify-between bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500 dark:text-gray-400">Balance Source:</span>
-          <span className={`text-xs font-medium ${isConnected ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
-            {isConnected ? '🟢 Connected to Bybit' : '🟡 Demo Mode'}
+      {/* Mode Toggle and Balance Controls */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Mode:</span>
+            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+              <button
+                onClick={() => {
+                  if (mode === 'live') {
+                    setMode('paper');
+                    fetchMetrics();
+                  } else if (mode === 'paper') {
+                    toggleMode();
+                  }
+                }}
+                className={`px-3 py-1 text-xs font-semibold transition-colors ${
+                  mode === 'paper'
+                    ? 'bg-yellow-500 text-white'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                📄 Paper
+              </button>
+              <button
+                onClick={() => {
+                  if (mode === 'paper') {
+                    toggleMode();
+                  }
+                }}
+                className={`px-3 py-1 text-xs font-semibold transition-colors ${
+                  mode === 'live'
+                    ? 'bg-red-500 text-white'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                ⚡ Live
+              </button>
+            </div>
+          </div>
+          <span className={`text-xs font-medium ${
+            mode === 'live' 
+              ? isConnected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              : 'text-yellow-600 dark:text-yellow-400'
+          }`}>
+            {mode === 'live' 
+              ? isConnected ? '🟢 Connected to Bybit' : '🔴 Not Connected'
+              : '📄 Virtual Balance $100'}
           </span>
-          {!isConnected && (
+          {mode === 'live' && !isConnected && (
             <span className="text-[10px] text-gray-400 dark:text-gray-500">
               (Set API keys in .env.local)
             </span>
