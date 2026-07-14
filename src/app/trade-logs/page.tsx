@@ -49,6 +49,33 @@ interface Position {
 
 type SortKey = keyof Trade;
 
+// Helper to format price with 4 decimal places
+const formatPriceDisplay = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
+// Helper to format price with $ symbol
+const formatPrice = (price: number): string => {
+  return `$${formatPriceDisplay(price)}`;
+};
+
+// Helper to format price for table display
+const formatPriceTable = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
 // Bybit API endpoints
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
@@ -471,8 +498,8 @@ export default function TradeLogsPage() {
       id: `trade-${symbol}-${now}`,
       symbol,
       side: isLong ? 'LONG' : 'SHORT',
-      entryPrice: Math.round(entryPrice * 100) / 100,
-      exitPrice: Math.round(exitPrice * 100) / 100,
+      entryPrice: Math.round(entryPrice * 10000) / 10000,
+      exitPrice: Math.round(exitPrice * 10000) / 10000,
       size: Math.round((0.01 + Math.random() * 0.05) * 1000) / 1000,
       pnl: Math.round(pnl * 100) / 100,
       pnlPct: Math.round(pnlPct * 10) / 10,
@@ -628,7 +655,7 @@ export default function TradeLogsPage() {
               : (t.entryPrice - price) * t.size;
             return {
               ...t,
-              exitPrice: Math.round(price * 100) / 100,
+              exitPrice: Math.round(price * 10000) / 10000,
               pnl: Math.round(pnl * 100) / 100,
               pnlPct: Math.round((pnl / t.entryPrice) * 100 * 10) / 10,
             };
@@ -678,8 +705,8 @@ export default function TradeLogsPage() {
         t.id,
         t.symbol,
         t.side,
-        t.entryPrice.toFixed(2),
-        t.exitPrice.toFixed(2),
+        formatPriceTable(t.entryPrice),
+        formatPriceTable(t.exitPrice),
         t.size.toFixed(3),
         t.pnl.toFixed(2),
         t.pnlPct.toFixed(1),
@@ -982,10 +1009,10 @@ export default function TradeLogsPage() {
                         {pos.size}
                       </td>
                       <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
-                        ${pos.entryPrice.toFixed(2)}
+                        ${formatPriceTable(pos.entryPrice)}
                       </td>
                       <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
-                        ${pos.markPrice.toFixed(2)}
+                        ${formatPriceTable(pos.markPrice)}
                       </td>
                       <td className={`py-2 px-2 text-right font-mono text-xs font-bold ${
                         pos.unrealisedPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
@@ -996,7 +1023,7 @@ export default function TradeLogsPage() {
                         {pos.leverage}x
                       </td>
                       <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
-                        ${pos.liqPrice.toFixed(2)}
+                        ${formatPriceTable(pos.liqPrice)}
                       </td>
                       <td className="py-2 px-2 text-right">
                         <button
@@ -1167,10 +1194,10 @@ export default function TradeLogsPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2.5 font-mono text-xs text-gray-600 dark:text-gray-300">
-                      ${trade.entryPrice.toLocaleString()}
+                      ${formatPriceTable(trade.entryPrice)}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-xs text-gray-600 dark:text-gray-300">
-                      {trade.exitPrice ? `$${trade.exitPrice.toLocaleString()}` : '-'}
+                      {trade.exitPrice ? `$${formatPriceTable(trade.exitPrice)}` : '-'}
                     </td>
                     <td className={`px-3 py-2.5 font-mono text-xs font-bold ${
                       trade.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'

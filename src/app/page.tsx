@@ -108,6 +108,25 @@ interface BotStatus {
   uptime: string;
 }
 
+// Helper to format price with 4 decimal places
+const formatPriceDisplay = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
+const formatPrice = (price: number): string => {
+  return `$${formatPriceDisplay(price)}`;
+};
+
+const formatPriceTable = (price: number): string => {
+  return formatPriceDisplay(price);
+};
+
 // ============== BYBIT API ==============
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
@@ -381,7 +400,7 @@ const LiveMetricCards = ({ metrics }: { metrics: AccountMetrics }) => {
   const cards = [
     { 
       label: 'Total Equity', 
-      value: `$${metrics.equity.toLocaleString()}`, 
+      value: `$${metrics.equity.toFixed(2)}`, 
       change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`,
       icon: Wallet,
       color: metrics.totalPnlPct >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
@@ -543,7 +562,7 @@ const OpenPositionsTable = ({ positions, onClosePosition }: {
                   </span>
                 </td>
                 <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
-                  ${pos.entryPrice.toLocaleString()}
+                  ${formatPriceTable(pos.entryPrice)}
                 </td>
                 <td className={`py-2 px-2 text-right font-mono text-xs font-bold ${
                   pos.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
@@ -725,7 +744,7 @@ const SignalFeed = ({ signals }: { signals: Signal[] }) => {
                 </div>
               </div>
               <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-                <span>Entry: ${signal.entryPrice.toLocaleString()}</span>
+                <span>Entry: ${formatPriceTable(signal.entryPrice)}</span>
                 <span>R:R 1:{signal.rr}</span>
                 <span>{signal.generatedAt}</span>
               </div>
@@ -1228,8 +1247,8 @@ export default function Home() {
                   id: `pos-${pos.symbol}-${pos.positionIdx}`,
                   symbol: pos.symbol,
                   side,
-                  entryPrice,
-                  currentPrice: markPrice,
+                  entryPrice: Math.round(entryPrice * 10000) / 10000,
+                  currentPrice: Math.round(markPrice * 10000) / 10000,
                   size: Math.abs(size),
                   pnl,
                   pnlPct,
@@ -1278,8 +1297,8 @@ export default function Home() {
                 id: `pos-${symbol}-${Date.now()}`,
                 symbol,
                 side: isLong ? 'LONG' : 'SHORT',
-                entryPrice,
-                currentPrice: price,
+                entryPrice: Math.round(entryPrice * 10000) / 10000,
+                currentPrice: Math.round(price * 10000) / 10000,
                 size: 0.001 + Math.random() * 0.003,
                 pnl,
                 pnlPct,
@@ -1306,8 +1325,8 @@ export default function Home() {
                 id: `trade-${symbol}-${Date.now()}`,
                 symbol,
                 side,
-                entryPrice: Math.round(entryPrice * 100) / 100,
-                exitPrice: Math.round(exitPrice * 100) / 100,
+                entryPrice: Math.round(entryPrice * 10000) / 10000,
+                exitPrice: Math.round(exitPrice * 10000) / 10000,
                 size: 0.001 + Math.random() * 0.002,
                 pnl: Math.round((pnl * 0.5) * 100) / 100,
                 pnlPct: Math.round(pnl * 10) / 10,
@@ -1337,10 +1356,10 @@ export default function Home() {
               symbol,
               direction: isLong ? 'LONG' : 'SHORT',
               confidence: Math.min(95, Math.round(confidence)),
-              entryPrice,
-              sl,
-              tp1,
-              tp2: isLong ? price + atr * 4 : price - atr * 4,
+              entryPrice: Math.round(entryPrice * 10000) / 10000,
+              sl: Math.round(sl * 10000) / 10000,
+              tp1: Math.round(tp1 * 10000) / 10000,
+              tp2: Math.round((isLong ? price + atr * 4 : price - atr * 4) * 10000) / 10000,
               rr: Math.round(rr * 10) / 10,
               timeframe: Math.abs(change24h) > 2 ? '15m' : '5m',
               status: status as 'pending' | 'live' | 'rejected' | 'executed',
@@ -1357,7 +1376,7 @@ export default function Home() {
                 'signal', 
                 'high', 
                 `🔥 ${isLong ? 'LONG' : 'SHORT'} ${symbol}`, 
-                `Confidence: ${Math.round(confidence)}% | Entry: $${entryPrice.toFixed(2)} | R:R 1:${rr.toFixed(1)}`,
+                `Confidence: ${Math.round(confidence)}% | Entry: $${entryPrice.toFixed(4)} | R:R 1:${rr.toFixed(1)}`,
                 symbol,
                 entryPrice
               );
@@ -1841,9 +1860,9 @@ export default function Home() {
                             </span>
                           </div>
                           <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            <span>Entry: ${signal.entryPrice.toLocaleString()}</span>
-                            <span>SL: ${signal.sl.toLocaleString()}</span>
-                            <span>TP1: ${signal.tp1.toLocaleString()}</span>
+                            <span>Entry: ${formatPriceTable(signal.entryPrice)}</span>
+                            <span>SL: ${formatPriceTable(signal.sl)}</span>
+                            <span>TP1: ${formatPriceTable(signal.tp1)}</span>
                             <span>R:R 1:{signal.rr}</span>
                             <span>{signal.generatedAt}</span>
                           </div>

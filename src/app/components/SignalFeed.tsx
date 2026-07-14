@@ -38,6 +38,22 @@ const BYBIT_WS = {
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
 
+// Helper to format price with 4 decimal places
+const formatPrice = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
+// Helper to format price with 4 decimal places for display
+const formatPriceDisplay = (price: number): string => {
+  return price.toFixed(4);
+};
+
 const CONFIDENCE_COLOR = (c: number) =>
   c >= 88
     ? 'text-positive border-positive/30 bg-positive-subtle'
@@ -88,14 +104,19 @@ export default function SignalFeed() {
     const rsiValue = Math.round(50 + change24h * 1.5);
     const volumeSpike = Math.min(3, volume / 1e8 + 1);
 
+    // Format entry zone with 4 decimal places
+    const entryLow = price * 0.998;
+    const entryHigh = price * 1.002;
+    const entryZone = `${formatPriceDisplay(entryLow)} – ${formatPriceDisplay(entryHigh)}`;
+
     return {
       id: `sig-${symbol}-${Date.now()}`,
       symbol,
       direction: isLong ? 'long' : 'short',
       confidence: Math.round(confidence),
-      entryZone: `${(price * 0.998).toFixed(2)} – ${(price * 1.002).toFixed(2)}`,
-      stopLoss: Math.round(stopLoss * 100) / 100,
-      takeProfit1: Math.round(takeProfit1 * 100) / 100,
+      entryZone,
+      stopLoss: Math.round(stopLoss * 10000) / 10000,
+      takeProfit1: Math.round(takeProfit1 * 10000) / 10000,
       riskReward: Math.round(riskReward * 10) / 10,
       volumeSpike: Math.round(volumeSpike * 10) / 10,
       regime,
@@ -108,7 +129,7 @@ export default function SignalFeed() {
         volumeSpike > 1.5 ? 'VWAP+' : 'BB mid',
         `Vol×${volumeSpike.toFixed(1)}`,
       ],
-      entryPrice: price,
+      entryPrice: entryPrice,
       change24h,
       volume,
       price,
@@ -425,18 +446,18 @@ export default function SignalFeed() {
               <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[10px] font-mono mb-2">
                 <div>
                   <span className="text-muted-foreground">Entry: </span>
-                  <span className="text-foreground font-tabular">${signal.entryPrice.toFixed(2)}</span>
+                  <span className="text-foreground font-tabular">${formatPriceDisplay(signal.entryPrice)}</span>
                 </div>
                 <div>
                   <span className="text-negative">SL: </span>
                   <span className="text-foreground font-tabular">
-                    ${signal.stopLoss.toLocaleString()}
+                    ${formatPriceDisplay(signal.stopLoss)}
                   </span>
                 </div>
                 <div>
                   <span className="text-positive">TP1: </span>
                   <span className="text-foreground font-tabular">
-                    ${signal.takeProfit1.toLocaleString()}
+                    ${formatPriceDisplay(signal.takeProfit1)}
                   </span>
                 </div>
                 <div>
@@ -471,6 +492,12 @@ export default function SignalFeed() {
                   <Clock size={9} />
                   <span className="font-mono">{signal.generatedAt}</span>
                 </div>
+              </div>
+
+              {/* Entry Zone display with 4 decimal places */}
+              <div className="mt-1.5 text-[10px] text-muted-foreground">
+                <span className="font-medium">Entry Zone: </span>
+                <span className="font-mono text-foreground">{signal.entryZone}</span>
               </div>
             </div>
           ))

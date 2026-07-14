@@ -41,6 +41,22 @@ const OUTCOME_COLOR = {
   open: 'text-yellow-500',
 };
 
+// Helper to format price with 4 decimal places
+const formatPrice = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
+// Helper to format price with 4 decimal places for display
+const formatPriceDisplay = (price: number): string => {
+  return price.toFixed(4);
+};
+
 // Bybit API endpoints
 const BYBIT_API = {
   positions: 'https://api.bybit.com/v5/position/list',

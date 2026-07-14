@@ -35,6 +35,31 @@ interface LiveMetrics {
   drawdown: { used: number; limit: number; remaining: number };
 }
 
+// Helper to format price with 4 decimal places
+const formatPriceDisplay = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
+// Helper to format currency
+const formatCurrency = (value: number, showBalance: boolean = true): string => {
+  if (!showBalance) {
+    return '••••••';
+  }
+  if (Math.abs(value) >= 1000) {
+    return `$${value.toFixed(2)}`;
+  } else if (Math.abs(value) >= 1) {
+    return `$${value.toFixed(4)}`;
+  } else {
+    return `$${value.toFixed(6)}`;
+  }
+};
+
 // Bybit API endpoints
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
@@ -236,9 +261,8 @@ export default function LiveMetricCards() {
         const volume = parseFloat(ticker.volume24h);
         
         // Calculate daily P&L based on price change
-        // For paper mode, use smaller multipliers to simulate realistic returns on $100
         const volatility = Math.abs(change24h);
-        const multiplier = mode === 'paper' ? 0.5 : 1.0; // Paper mode is less volatile
+        const multiplier = mode === 'paper' ? 0.5 : 1.0;
         const dailyPnl = balance * (change24h / 100) * 0.3 * multiplier;
         const currentEquity = balance + dailyPnl;
         
@@ -338,12 +362,12 @@ export default function LiveMetricCards() {
     return () => clearInterval(interval);
   }, [mode]);
 
-  // Format currency with optional hiding
-  const formatCurrency = (value: number) => {
+  // Format currency with 4 decimal places
+  const formatCurrencyDisplay = (value: number) => {
     if (!showBalance) {
       return '••••••';
     }
-    return `$${value.toFixed(2)}`;
+    return formatCurrency(value, true);
   };
 
   if (isLoading || !metrics) {
@@ -362,8 +386,8 @@ export default function LiveMetricCards() {
     {
       id: 'metric-equity',
       title: `Account Equity ${mode === 'live' ? (isConnected ? '🟢' : '🔴') : '📄'}`,
-      value: formatCurrency(metrics.equity.value),
-      subValue: `Balance: ${formatCurrency(metrics.equity.balance)} · Unrealized: ${metrics.equity.unrealized >= 0 ? '+' : ''}${formatCurrency(metrics.equity.unrealized)}`,
+      value: formatCurrencyDisplay(metrics.equity.value),
+      subValue: `Balance: ${formatCurrencyDisplay(metrics.equity.balance)} · Unrealized: ${metrics.equity.unrealized >= 0 ? '+' : ''}${formatCurrencyDisplay(metrics.equity.unrealized)}`,
       change: `${(metrics.equity.value / metrics.equity.balance * 100 - 100).toFixed(2)}%`,
       changePositive: metrics.equity.value >= metrics.equity.balance,
       icon: DollarSign,
@@ -374,7 +398,7 @@ export default function LiveMetricCards() {
     {
       id: 'metric-pnl',
       title: "Today's P&L",
-      value: `${metrics.pnl.daily >= 0 ? '+' : ''}${formatCurrency(metrics.pnl.daily)}`,
+      value: `${metrics.pnl.daily >= 0 ? '+' : ''}${formatCurrencyDisplay(metrics.pnl.daily)}`,
       subValue: `${metrics.pnl.pct >= 0 ? '+' : ''}${metrics.pnl.pct.toFixed(2)}% vs open balance`,
       change: `${metrics.pnl.pct >= 0 ? '+' : ''}${metrics.pnl.pct.toFixed(2)}%`,
       changePositive: metrics.pnl.daily >= 0,
@@ -489,7 +513,7 @@ export default function LiveMetricCards() {
             {showBalance ? <EyeOff size={16} className="text-gray-500" /> : <Eye size={16} className="text-gray-500" />}
           </button>
           <span className="text-xs text-gray-500 dark:text-gray-400">
-            Balance: {formatCurrency(baseEquity)}
+            Balance: {formatCurrencyDisplay(baseEquity)}
           </span>
         </div>
       </div>

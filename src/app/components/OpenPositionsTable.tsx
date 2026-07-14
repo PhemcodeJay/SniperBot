@@ -31,6 +31,17 @@ interface Position {
 
 type SortKey = 'symbol' | 'unrealizedPnl' | 'confidence' | 'holdMins';
 
+// Helper to format price with 4 decimal places
+const formatPriceDisplay = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
 // Bybit API endpoints
 const BYBIT_API = {
   positions: 'https://api.bybit.com/v5/position/list',
@@ -749,7 +760,7 @@ export default function OpenPositionsTable() {
                       <StatusBadge variant={pos.direction} />
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground font-tabular">
-                      ${pos.entryPrice.toLocaleString()}
+                      ${formatPriceDisplay(pos.entryPrice)}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs font-tabular">
                       <span
@@ -758,7 +769,7 @@ export default function OpenPositionsTable() {
                             ? 'text-positive' : 'text-negative'
                         }
                       >
-                        ${pos.currentPrice.toLocaleString()}
+                        ${formatPriceDisplay(pos.currentPrice)}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground font-tabular">
@@ -796,19 +807,19 @@ export default function OpenPositionsTable() {
                         <div className="flex gap-1 items-center">
                           <span className="text-negative w-6">SL</span>
                           <span className="text-muted-foreground">
-                            ${pos.stopLoss.toLocaleString()}
+                            ${formatPriceDisplay(pos.stopLoss)}
                           </span>
                         </div>
                         <div className="flex gap-1 items-center">
                           <span className="text-positive w-6">T1</span>
                           <span className="text-muted-foreground">
-                            ${pos.takeProfit1.toLocaleString()}
+                            ${formatPriceDisplay(pos.takeProfit1)}
                           </span>
                         </div>
                         <div className="flex gap-1 items-center">
                           <span className="text-positive w-6">T2</span>
                           <span className="text-muted-foreground">
-                            ${pos.takeProfit2.toLocaleString()}
+                            ${formatPriceDisplay(pos.takeProfit2)}
                           </span>
                         </div>
                       </div>

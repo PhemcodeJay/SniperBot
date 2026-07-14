@@ -42,6 +42,22 @@ interface Indicator {
   category: 'momentum' | 'trend' | 'volatility' | 'volume';
 }
 
+// Helper to format price with 4 decimal places
+const formatPriceDisplay = (price: number): string => {
+  if (price >= 1000) {
+    return price.toFixed(2);
+  } else if (price >= 1) {
+    return price.toFixed(4);
+  } else {
+    return price.toFixed(6);
+  }
+};
+
+// Helper to format price for display with $ symbol
+const formatPrice = (price: number): string => {
+  return `$${formatPriceDisplay(price)}`;
+};
+
 // Bybit API endpoints
 const BYBIT_API = {
   spot: 'https://api.bybit.com/v5/market/tickers',
@@ -218,10 +234,10 @@ export default function SignalEnginePage() {
       symbol,
       direction: isLong ? 'LONG' : 'SHORT',
       confidence: Math.round(confidence),
-      entryPrice: Math.round(entryPrice * 100) / 100,
-      sl: Math.round(stopLoss * 100) / 100,
-      tp1: Math.round(takeProfit1 * 100) / 100,
-      tp2: Math.round(takeProfit2 * 100) / 100,
+      entryPrice: Math.round(entryPrice * 10000) / 10000,
+      sl: Math.round(stopLoss * 10000) / 10000,
+      tp1: Math.round(takeProfit1 * 10000) / 10000,
+      tp2: Math.round(takeProfit2 * 10000) / 10000,
       rr: Math.round(rr * 10) / 10,
       regime,
       volumeSpike: Math.round(volumeFactor * 10) / 10,
@@ -725,7 +741,7 @@ export default function SignalEnginePage() {
                               </div>
                               <div className="flex items-center gap-3 mt-1 flex-wrap">
                                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                                  Entry: <span className="font-mono text-gray-900 dark:text-white">${signal.entryPrice.toLocaleString()}</span>
+                                  Entry: <span className="font-mono text-gray-900 dark:text-white">${formatPriceDisplay(signal.entryPrice)}</span>
                                 </span>
                                 <span className="text-xs text-gray-500 dark:text-gray-400">
                                   R:R <span className="font-mono text-gray-900 dark:text-white">1:{signal.rr}</span>
@@ -779,9 +795,9 @@ export default function SignalEnginePage() {
                             )}
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                               {[
-                                { label: 'Stop Loss', value: `$${signal.sl.toLocaleString()}`, color: 'text-red-600 dark:text-red-400' },
-                                { label: 'TP1', value: `$${signal.tp1.toLocaleString()}`, color: 'text-green-600 dark:text-green-400' },
-                                { label: 'TP2', value: `$${signal.tp2.toLocaleString()}`, color: 'text-green-600 dark:text-green-400' },
+                                { label: 'Stop Loss', value: `${formatPrice(signal.sl)}`, color: 'text-red-600 dark:text-red-400' },
+                                { label: 'TP1', value: `${formatPrice(signal.tp1)}`, color: 'text-green-600 dark:text-green-400' },
+                                { label: 'TP2', value: `${formatPrice(signal.tp2)}`, color: 'text-green-600 dark:text-green-400' },
                               ].map(({ label, value, color }) => (
                                 <div key={label} className="bg-gray-50 dark:bg-gray-800/50 rounded p-2 text-center">
                                   <p className="text-[10px] text-gray-500 dark:text-gray-400">{label}</p>
