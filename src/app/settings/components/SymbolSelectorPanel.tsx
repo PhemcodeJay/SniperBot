@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Search, X, TrendingUp, Star, Loader2 } from 'lucide-react';
 
 interface SymbolData {
@@ -13,6 +13,17 @@ interface SymbolData {
   change24h: string;
 }
 
+interface SymbolConfig {
+  symbol: string;
+  enabled: boolean;
+  baseAsset: string;
+  quoteAsset: string;
+  price: string;
+  volume24h: string;
+  change24h: string;
+  volumeRaw: number;
+}
+
 const CATEGORY_COLORS: Record<string, string> = {
   'Major': 'bg-primary/10 text-primary',
   'Meme': 'bg-warning-subtle text-warning',
@@ -22,6 +33,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   'AI': 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400',
   'Gaming': 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
 };
+
+const DEFAULT_SELECTED = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
 
 // Common categories based on symbol
 const getSymbolCategory = (symbol: string): string => {
@@ -60,91 +73,72 @@ const getSymbolCategory = (symbol: string): string => {
   return 'Alt';
 };
 
+// Bybit API endpoint
+const BYBIT_API = {
+  mainnet: 'https://api.bybit.com',
+};
+
 export default function SymbolSelectorPanel() {
   const [selected, setSelected] = useState<string[]>(DEFAULT_SELECTED);
   const [search, setSearch] = useState('');
   const [saved, setSaved] = useState(false);
-  const [symbols, setSymbols] = useState<SymbolData[]>([]);
+  const [symbols, setSymbols] = useState<SymbolConfig[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
 
-  useEffect(() => {
-    const fetchSymbols = async () => {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        // Fetch USDT perpetuals
-        const response = await fetch('https://api.bybit.com/v5/market/tickers?category=linear');
-        const data = await response.json();
+  const fetchSymbols = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${BYBIT_API.mainnet}/v5/market/tickers?category=linear`);
+      const data = await response.json();
+
+      if (data.retCode === 0 && data.result?.list) {
+        const tickers = data.result.list;
+        const defaultEnabled = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
         
-        if (data.retCode === 0 && data.result?.list) {
-          const tickers = data.result.list;
-          
-          // Map all symbols with volume data
-          const mappedSymbols: SymbolData[] = tickers
-            .filter((ticker: any) => ticker.symbol.endsWith('USDT'))
-            .map((ticker: any) => {
-              const volume = parseFloat(ticker.volume24h) || 0;
-              const price = parseFloat(ticker.lastPrice) || 0;
-              const change24h = parseFloat(ticker.price24hPcnt) * 100 || 0;
-              const symbol = ticker.symbol;
-              
-              return {
-                symbol: symbol,
-                name: symbol.replace('USDT', '').replace('USDC', ''),
-                category: getSymbolCategory(symbol),
-                volume: `$${(volume / 1e6).toFixed(1)}M`,
-                volumeRaw: volume,
-                price: price > 1 ? price.toFixed(2) : price.toFixed(4),
-                change24h: change24h.toFixed(2) + '%',
-              };
-            })
-            .sort((a, b) => b.volumeRaw - a.volumeRaw);
-          
-          // Show top 50 by default, allow showing all
-          const topSymbols = showAll ? mappedSymbols : mappedSymbols.slice(0, 50);
-          setSymbols(topSymbols);
-        } else {
-          throw new Error(data.retMsg || 'Failed to fetch symbols');
-        }
-      } catch (err: any) {
-        setError(err.message || 'Failed to load symbols');
-        setSymbols([]);
-      } finally {
-        setIsLoading(false);
+        // Map all USDT pairs with volume data and proper typing
+        const mappedSymbols: SymbolConfig[] = tickers
+          .filter((t: any) => t.symbol.endsWith('USDT'))
+          .map((t: any) => {
+            const volume = parseFloat(t.volume24h) || 0;
+            const price = parseFloat(t.lastPrice) || 0;
+            const change24h = parseFloat(t.price24hPcnt) * 100 || 0;
+            
+            return {
+              symbol: t.symbol,
+              enabled: defaultEnabled.includes(t.symbol),
+              baseAsset: t.symbol.replace('USDT', ''),
+              quoteAsset: 'USDT',
+              price: price > 1 ? price.toFixed(2) : price.toFixed(4),
+              volume24h: `$${(volume / 1e6).toFixed(1)}M`,
+              change24h: `${change24h.toFixed(2)}%`,
+              volumeRaw: volume,
+            };
+          })
+          .sort((a: SymbolConfig, b: SymbolConfig) => b.volumeRaw - a.volumeRaw);
+
+        // Show top 50 by default, or all if showAll is true
+        const topSymbols = showAll ? mappedSymbols : mappedSymbols.slice(0, 50);
+        setSymbols(topSymbols);
+      } else {
+        throw new Error(data.retMsg || 'Failed to fetch symbols');
       }
-    };
-    
-    fetchSymbols();
+    } catch (err: any) {
+      setError(err.message || 'Failed to load symbols');
+      setSymbols([]);
+    } finally {
+      setIsLoading(false);
+    }
   }, [showAll]);
 
-  const filtered = symbols.filter(
-    (s) =>
-      s.symbol.toLowerCase().includes(search.toLowerCase()) ||
-      s.name.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    fetchSymbols();
+  }, [fetchSymbols]);
 
-  const toggle = (symbol: string) => {
-    setSaved(false);
-    setSelected((prev) =>
-      prev.includes(symbol)
-        ? prev.filter((s) => s !== symbol)
-        : prev.length < 20
-        ? [...prev, symbol]
-        : prev
-    );
-  };
-
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
-    // Store selected symbols in localStorage
-    localStorage.setItem('selected_symbols', JSON.stringify(selected));
-  };
-
-  // Load saved selections
+  // Load saved selections from localStorage
   useEffect(() => {
     const savedSymbols = localStorage.getItem('selected_symbols');
     if (savedSymbols) {
@@ -158,6 +152,35 @@ export default function SymbolSelectorPanel() {
       }
     }
   }, []);
+
+  const toggleSymbol = (symbol: string) => {
+    setSaved(false);
+    setSelected((prev) =>
+      prev.includes(symbol)
+        ? prev.filter((s) => s !== symbol)
+        : prev.length < 20
+        ? [...prev, symbol]
+        : prev
+    );
+  };
+
+  const toggleAll = () => {
+    const allEnabled = symbols.every((s) => s.enabled);
+    setSymbols((prev) => prev.map((s) => ({ ...s, enabled: !allEnabled })));
+  };
+
+  const handleSave = () => {
+    setSaved(true);
+    // Store selected symbols in localStorage
+    localStorage.setItem('selected_symbols', JSON.stringify(selected));
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const filteredSymbols = symbols.filter((s) =>
+    s.symbol.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const enabledCount = symbols.filter((s) => s.enabled).length;
 
   if (isLoading) {
     return (
@@ -199,6 +222,9 @@ export default function SymbolSelectorPanel() {
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-negative-subtle border border-negative/20 text-negative text-xs">
           ⚠️ {error}
+          <button onClick={fetchSymbols} className="ml-2 text-blue-600 hover:underline">
+            Retry
+          </button>
         </div>
       )}
 
@@ -211,7 +237,7 @@ export default function SymbolSelectorPanel() {
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-[11px] font-mono font-semibold"
             >
               {sym.replace('USDT', '')}
-              <button onClick={() => toggle(sym)} className="hover:text-negative transition-colors">
+              <button onClick={() => toggleSymbol(sym)} className="hover:text-negative transition-colors">
                 <X size={10} />
               </button>
             </span>
@@ -233,13 +259,14 @@ export default function SymbolSelectorPanel() {
 
       {/* Symbol grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-64 overflow-y-auto scrollbar-thin pr-1">
-        {filtered.length > 0 ? (
-          filtered.map((item) => {
+        {filteredSymbols.length > 0 ? (
+          filteredSymbols.map((item) => {
             const isSelected = selected.includes(item.symbol);
+            const category = getSymbolCategory(item.symbol);
             return (
               <button
                 key={item.symbol}
-                onClick={() => toggle(item.symbol)}
+                onClick={() => toggleSymbol(item.symbol)}
                 className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left transition-all duration-100 ${
                   isSelected
                     ? 'bg-primary/10 border-primary/30 text-foreground'
@@ -253,13 +280,13 @@ export default function SymbolSelectorPanel() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-mono font-semibold text-foreground truncate">{item.symbol}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{item.name}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{item.baseAsset}</p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5 shrink-0">
-                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[item.category] || 'bg-muted text-muted-foreground'}`}>
-                    {item.category}
+                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[category] || 'bg-muted text-muted-foreground'}`}>
+                    {category}
                   </span>
-                  <span className="text-[9px] text-muted-foreground font-mono">{item.volume}</span>
+                  <span className="text-[9px] text-muted-foreground font-mono">{item.volume24h}</span>
                 </div>
               </button>
             );
@@ -273,7 +300,7 @@ export default function SymbolSelectorPanel() {
 
       {/* Show count */}
       <div className="flex justify-between items-center mt-2 text-[10px] text-muted-foreground">
-        <span>Showing {filtered.length} of {symbols.length} symbols</span>
+        <span>Showing {filteredSymbols.length} of {symbols.length} symbols</span>
         {!showAll && symbols.length > 50 && (
           <button
             onClick={() => setShowAll(true)}
