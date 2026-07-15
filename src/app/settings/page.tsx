@@ -1,3 +1,5 @@
+// app/settings/page.tsx - FIXED for Unified Trading Account
+
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -104,8 +106,10 @@ const ApiCredentialsPanel = () => {
   const [copied, setCopied] = useState(false);
   const [balance, setBalance] = useState<string>('');
   const [uid, setUid] = useState<string>('');
-  const [accountType, setAccountType] = useState<string>('');
+  const [accountType, setAccountType] = useState<string>('Checking...');
   const [error, setError] = useState<string | null>(null);
+  const [isLoadingAccountInfo, setIsLoadingAccountInfo] = useState(false);
+  const [accountInfoDetails, setAccountInfoDetails] = useState<any>(null);
 
   const testConnection = async () => {
     if (!credentials.apiKey || !credentials.apiSecret) {
@@ -118,6 +122,7 @@ const ApiCredentialsPanel = () => {
     setTestStatus('idle');
     setTestMessage('');
     setError(null);
+    setAccountType('Checking...');
 
     const baseUrl = credentials.isTestnet ? BYBIT_API.testnet : BYBIT_API.mainnet;
     const timestamp = Date.now().toString();
@@ -127,6 +132,7 @@ const ApiCredentialsPanel = () => {
     try {
       const signature = generateSignature(credentials.apiKey, credentials.apiSecret, timestamp, recvWindow, params);
       
+      // First, get wallet balance
       const response = await fetch(`${baseUrl}/v5/account/wallet-balance`, {
         method: 'GET',
         headers: {
@@ -151,7 +157,9 @@ const ApiCredentialsPanel = () => {
         setBalance(`${parseFloat(balanceAmount).toFixed(2)} USDT`);
         setUid(accountUid);
         
+        // Get account info - Unified Trading Account
         try {
+          setIsLoadingAccountInfo(true);
           const accountInfoResponse = await fetch(`${baseUrl}/v5/account/info`, {
             method: 'GET',
             headers: {
@@ -162,11 +170,61 @@ const ApiCredentialsPanel = () => {
             },
           });
           const accountData = await safeJsonParse(accountInfoResponse);
+          
           if (accountData && accountData.retCode === 0 && accountData.result) {
-            setAccountType(accountData.result.accountType || accountData.result.accType || 'Unified');
+            setAccountInfoDetails(accountData.result);
+            
+            // For Unified Trading Account, accountType might be null, but we can determine it from other fields
+            let accType = 'Unified Trading Account';
+            
+            // Check various fields that might indicate account type
+            if (accountData.result.accountType) {
+              accType = accountData.result.accountType;
+            } else if (accountData.result.accType) {
+              accType = accountData.result.accType;
+            } else if (accountData.result.type) {
+              accType = accountData.result.type;
+            } else if (accountData.result.unifiedAccountInfo) {
+              // Check if it's a Unified account
+              const unifiedInfo = accountData.result.unifiedAccountInfo;
+              if (unifiedInfo) {
+                accType = 'Unified Trading Account';
+                // Try to get more specific type
+                if (unifiedInfo.accountType) {
+                  accType = unifiedInfo.accountType;
+                } else if (unifiedInfo.spot) {
+                  accType = 'Unified Spot & Derivatives';
+                }
+              }
+            } else if (accountData.result.spot) {
+              // Check if it has spot section - indicates Unified account
+              accType = 'Unified Trading Account';
+            } else if (accountData.result.linear) {
+              // Check if it has linear section - indicates Unified account
+              accType = 'Unified Trading Account (Linear)';
+            } else if (accountData.result.inverse) {
+              // Check if it has inverse section - indicates Unified account
+              accType = 'Unified Trading Account (Inverse)';
+            } else if (accountData.result.option) {
+              accType = 'Unified Trading Account (Options)';
+            }
+            
+            // If we have the account type from the response, use it
+            if (accountData.result.accountType) {
+              accType = accountData.result.accountType;
+            }
+            
+            setAccountType(accType);
+          } else {
+            // If account info fails, but wallet works, it's likely a Unified account
+            setAccountType('Unified Trading Account');
           }
         } catch (e) {
-          // Account info fetch is optional
+          // Account info fetch failed, but wallet worked - assume Unified account
+          console.warn('Could not fetch account info, assuming Unified account:', e);
+          setAccountType('Unified Trading Account');
+        } finally {
+          setIsLoadingAccountInfo(false);
         }
         
         setTestStatus('success');
@@ -286,7 +344,7 @@ const ApiCredentialsPanel = () => {
             ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' 
             : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
         }`}>
-          {credentials.isTestnet ? 'Testnet' : 'Live'}
+          {credentials.isTestnet ? 'Testnet' : 'Mainnet'}
         </span>
       </div>
 
@@ -425,16 +483,22 @@ const ApiCredentialsPanel = () => {
                       <p className="text-xs font-bold font-mono text-green-600 dark:text-green-400">{balance}</p>
                     </div>
                   )}
-                  {accountType && (
+                  {accountType && accountType !== 'Checking...' && (
                     <div className="bg-white dark:bg-gray-800/80 rounded-md px-2 py-1.5">
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">Account Type</p>
                       <p className="text-xs font-bold font-mono text-blue-600 dark:text-blue-400">{accountType}</p>
                     </div>
                   )}
-                  {uid && (
+                  {uid && uid !== 'N/A' && (
                     <div className="bg-white dark:bg-gray-800/80 rounded-md px-2 py-1.5 col-span-2">
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">Account UID</p>
                       <p className="text-xs font-bold font-mono text-gray-900 dark:text-white">{uid}</p>
+                    </div>
+                  )}
+                  {isLoadingAccountInfo && (
+                    <div className="col-span-2 flex items-center gap-2 text-[10px] text-gray-500 dark:text-gray-400">
+                      <Loader2 size={12} className="animate-spin" />
+                      Loading account details...
                     </div>
                   )}
                 </div>
