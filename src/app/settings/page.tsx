@@ -60,15 +60,12 @@ const BYBIT_WS = {
 };
 
 // ============== UTILITY FUNCTIONS ==============
-// FIXED: Correct signature generation for Bybit API V5
 const generateSignature = (apiKey: string, apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
   const crypto = require('crypto');
-  // Bybit V5 signature format: timestamp + apiKey + recvWindow + params
   const paramStr = timestamp + apiKey + recvWindow + params;
   return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
 };
 
-// Helper to safely parse JSON
 const safeJsonParse = async (response: Response) => {
   try {
     const text = await response.text();
@@ -90,7 +87,7 @@ const formatTime = (seconds: number): string => {
 
 // ============== COMPONENTS ==============
 
-// API Credentials Panel - FIXED
+// API Credentials Panel
 const ApiCredentialsPanel = () => {
   const [credentials, setCredentials] = useState<ApiCredentials>({
     apiKey: '',
@@ -110,7 +107,6 @@ const ApiCredentialsPanel = () => {
   const [accountType, setAccountType] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
-  // FIXED: Test connection with proper signature
   const testConnection = async () => {
     if (!credentials.apiKey || !credentials.apiSecret) {
       setTestStatus('error');
@@ -129,10 +125,8 @@ const ApiCredentialsPanel = () => {
     const params = '';
 
     try {
-      // Generate signature correctly
       const signature = generateSignature(credentials.apiKey, credentials.apiSecret, timestamp, recvWindow, params);
       
-      // Test wallet balance endpoint
       const response = await fetch(`${baseUrl}/v5/account/wallet-balance`, {
         method: 'GET',
         headers: {
@@ -146,20 +140,17 @@ const ApiCredentialsPanel = () => {
       const data = await safeJsonParse(response);
 
       if (data && data.retCode === 0 && data.result) {
-        // Successfully connected
         const wallet = data.result.list?.[0];
         const totalEquity = wallet?.totalEquity || wallet?.equity || '0';
         const availableBalance = wallet?.availableBalance || wallet?.available || '0';
         const walletBalance = wallet?.walletBalance || wallet?.balance || '0';
         
-        // Use totalEquity as primary balance
         const balanceAmount = totalEquity || availableBalance || walletBalance || '0';
         const accountUid = data.result.uid || data.result.accountUid || 'N/A';
         
         setBalance(`${parseFloat(balanceAmount).toFixed(2)} USDT`);
         setUid(accountUid);
         
-        // Also fetch account info for account type
         try {
           const accountInfoResponse = await fetch(`${baseUrl}/v5/account/info`, {
             method: 'GET',
@@ -182,7 +173,6 @@ const ApiCredentialsPanel = () => {
         setTestMessage('✅ Connection verified successfully!');
         setError(null);
       } else {
-        // Handle API error
         const errorMsg = data?.retMsg || 'Unknown error';
         const errorCode = data?.retCode || 'Unknown';
         
@@ -232,14 +222,12 @@ const ApiCredentialsPanel = () => {
     setError(null);
     
     try {
-      // Save to localStorage
       localStorage.setItem('bybit_credentials', JSON.stringify({
         apiKey: credentials.apiKey,
         apiSecret: credentials.apiSecret,
         isTestnet: credentials.isTestnet,
       }));
       
-      // Also set environment variables for runtime
       process.env.NEXT_PUBLIC_BYBIT_API_KEY = credentials.apiKey;
       process.env.NEXT_PUBLIC_BYBIT_API_SECRET = credentials.apiSecret;
       process.env.NEXT_PUBLIC_BYBIT_IS_TESTNET = String(credentials.isTestnet);
@@ -262,7 +250,6 @@ const ApiCredentialsPanel = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Load saved credentials on mount
   useEffect(() => {
     const saved = localStorage.getItem('bybit_credentials');
     if (saved) {
@@ -495,7 +482,7 @@ const SymbolSelectorPanel = () => {
               volumeRaw: volume,
             };
           })
-          .sort((a, b) => b.volumeRaw - a.volumeRaw);
+          .sort((a: SymbolConfig, b: SymbolConfig) => b.volumeRaw - a.volumeRaw); // FIXED: Added types
 
         const topSymbols = showAll ? mappedSymbols : mappedSymbols.slice(0, 50);
         setSymbols(topSymbols);
