@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import AppLogo from '@/components/ui/AppLogo';
@@ -16,9 +16,9 @@ import {
   Bell,
   Circle,
   Zap,
+  FileText,
 } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
-
 
 interface NavItem {
   id: string;
@@ -53,6 +53,12 @@ const NAV_GROUPS: NavGroup[] = [
         label: 'Performance',
         href: '/performance-analytics',
         icon: BarChart3,
+      },
+      {
+        id: 'nav-trade-logs',
+        label: 'Trade Logs',
+        href: '/trade-logs',
+        icon: FileText,
       },
     ],
   },
@@ -95,12 +101,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Admin',
     items: [
       {
-        id: 'nav-logs',
-        label: 'Trade Logs',
-        href: '/trade-logs',
-        icon: Activity,
-      },
-      {
         id: 'nav-settings',
         label: 'Settings',
         href: '/settings',
@@ -111,10 +111,10 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 const BADGE_CLASSES: Record<string, string> = {
-  positive: 'bg-positive-subtle text-positive border border-positive/20',
-  warning: 'bg-warning-subtle text-warning border border-warning/20',
-  negative: 'bg-negative-subtle text-negative border border-negative/20',
-  info: 'bg-info-subtle text-info border border-info/20',
+  positive: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800',
+  warning: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800',
+  negative: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800',
+  info: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800',
 };
 
 interface SidebarProps {
@@ -124,12 +124,54 @@ interface SidebarProps {
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
+
+  // Listen for alert updates
+  useEffect(() => {
+    const handleAlertUpdate = (event: CustomEvent) => {
+      const count = event.detail?.unreadCount || 0;
+      setUnreadAlerts(count);
+    };
+
+    window.addEventListener('alerts-updated', handleAlertUpdate as EventListener);
+    
+    // Check localStorage for alert count
+    const savedAlerts = localStorage.getItem('alerts');
+    if (savedAlerts) {
+      try {
+        const alerts = JSON.parse(savedAlerts);
+        const unread = alerts.filter((a: any) => !a.read).length;
+        setUnreadAlerts(unread);
+      } catch (e) {
+        // Ignore
+      }
+    }
+
+    return () => {
+      window.removeEventListener('alerts-updated', handleAlertUpdate as EventListener);
+    };
+  }, []);
+
+  // Update the alerts badge dynamically
+  const navGroupsWithBadges = NAV_GROUPS.map(group => ({
+    ...group,
+    items: group.items.map(item => {
+      if (item.id === 'nav-alerts' && unreadAlerts > 0) {
+        return {
+          ...item,
+          badge: unreadAlerts.toString(),
+          badgeVariant: unreadAlerts > 0 ? 'warning' : 'info',
+        };
+      }
+      return item;
+    }),
+  }));
 
   return (
     <aside
       className={`
         relative flex flex-col h-full
-        bg-card border-r border-border
+        bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800
         transition-all duration-300 ease-in-out
         ${collapsed ? 'w-16' : 'w-60'}
       `}
@@ -137,17 +179,17 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Logo */}
       <div
         className={`
-          flex items-center border-b border-border
+          flex items-center border-b border-gray-200 dark:border-gray-800
           ${collapsed ? 'justify-center px-3 py-4' : 'px-4 py-4 gap-3'}
         `}
       >
         <AppLogo size={32} />
         {!collapsed && (
           <div className="flex flex-col min-w-0">
-            <span className="text-foreground font-semibold text-sm leading-tight tracking-tight">
+            <span className="text-gray-900 dark:text-white font-semibold text-sm leading-tight tracking-tight">
               SniperBot
             </span>
-            <span className="text-muted-foreground text-[10px] font-mono tracking-widest uppercase">
+            <span className="text-gray-500 dark:text-gray-400 text-[10px] font-mono tracking-widest uppercase">
               v2.4.1
             </span>
           </div>
@@ -156,15 +198,15 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Bot Status Pill */}
       {!collapsed && (
-        <div className="mx-3 mt-3 mb-1 px-3 py-2 rounded-md bg-positive-subtle border border-positive/20 flex items-center gap-2">
+        <div className="mx-3 mt-3 mb-1 px-3 py-2 rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 flex items-center gap-2">
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-positive opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-positive" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
           </span>
-          <span className="text-positive text-xs font-semibold tracking-wide">
+          <span className="text-green-700 dark:text-green-400 text-xs font-semibold tracking-wide">
             BOT ACTIVE
           </span>
-          <span className="ml-auto text-muted-foreground text-[10px] font-mono">
+          <span className="ml-auto text-gray-500 dark:text-gray-400 text-[10px] font-mono">
             PAPER
           </span>
         </div>
@@ -172,18 +214,18 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {collapsed && (
         <div className="flex justify-center mt-3 mb-1">
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-positive opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-positive" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
           </span>
         </div>
       )}
 
       {/* Nav Groups */}
       <nav className="flex-1 overflow-y-auto scrollbar-thin px-2 py-2 space-y-4">
-        {NAV_GROUPS.map((group) => (
+        {navGroupsWithBadges.map((group) => (
           <div key={group.id}>
             {!collapsed && (
-              <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-500 dark:text-gray-400">
                 {group.label}
               </p>
             )}
@@ -205,14 +247,15 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                         ${collapsed ? 'justify-center px-2 py-2.5' : 'px-2.5 py-2 gap-2.5'}
                         ${
                           isActive
-                            ? 'bg-primary/10 text-primary' :'text-secondary-foreground hover:bg-muted hover:text-foreground'
+                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400'
+                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
                         }
                       `}
                       title={collapsed ? item.label : undefined}
                     >
                       <Icon
                         size={18}
-                        className={`shrink-0 ${isActive ? 'text-primary' : ''}`}
+                        className={`shrink-0 ${isActive ? 'text-blue-600 dark:text-blue-400' : ''}`}
                       />
                       {!collapsed && (
                         <>
@@ -233,10 +276,10 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
                       )}
                       {/* Tooltip for collapsed */}
                       {collapsed && (
-                        <div className="absolute left-full ml-2 px-2 py-1 bg-card border border-border rounded-md text-xs text-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 shadow-lg">
+                        <div className="absolute left-full ml-2 px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md text-xs text-gray-900 dark:text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 shadow-lg">
                           {item.label}
                           {item.badge && (
-                            <span className="ml-1.5 text-warning font-semibold">
+                            <span className="ml-1.5 text-yellow-600 dark:text-yellow-400 font-semibold">
                               ({item.badge})
                             </span>
                           )}
@@ -252,21 +295,21 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </nav>
 
       {/* Bottom: Collapse toggle + user */}
-      <div className="border-t border-border">
+      <div className="border-t border-gray-200 dark:border-gray-800">
         {!collapsed && (
           <div className="px-3 py-3 flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
-              <span className="text-primary text-[10px] font-bold">KW</span>
+            <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 flex items-center justify-center shrink-0">
+              <span className="text-blue-700 dark:text-blue-400 text-[10px] font-bold">KW</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-foreground truncate">
+              <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
                 Kyle Weston
               </p>
-              <p className="text-[10px] text-muted-foreground truncate">
+              <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
                 Trader · Paper Mode
               </p>
             </div>
-            <Circle size={8} className="text-positive fill-positive shrink-0" />
+            <Circle size={8} className="text-green-500 fill-green-500 shrink-0" />
           </div>
         )}
         <div
@@ -274,7 +317,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         >
           <button
             onClick={onToggle}
-            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-150 text-xs"
+            className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-150 text-xs"
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {collapsed ? (

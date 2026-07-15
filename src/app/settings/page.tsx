@@ -222,15 +222,21 @@ const ApiCredentialsPanel = () => {
     setError(null);
     
     try {
+      // Save to localStorage only - DO NOT modify process.env in browser
       localStorage.setItem('bybit_credentials', JSON.stringify({
         apiKey: credentials.apiKey,
         apiSecret: credentials.apiSecret,
         isTestnet: credentials.isTestnet,
       }));
       
-      process.env.NEXT_PUBLIC_BYBIT_API_KEY = credentials.apiKey;
-      process.env.NEXT_PUBLIC_BYBIT_API_SECRET = credentials.apiSecret;
-      process.env.NEXT_PUBLIC_BYBIT_IS_TESTNET = String(credentials.isTestnet);
+      // Dispatch a custom event to notify other components
+      window.dispatchEvent(new CustomEvent('bybit-credentials-saved', {
+        detail: {
+          apiKey: credentials.apiKey,
+          apiSecret: credentials.apiSecret,
+          isTestnet: credentials.isTestnet,
+        }
+      }));
       
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
@@ -250,6 +256,7 @@ const ApiCredentialsPanel = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Load saved credentials from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('bybit_credentials');
     if (saved) {
@@ -482,7 +489,7 @@ const SymbolSelectorPanel = () => {
               volumeRaw: volume,
             };
           })
-          .sort((a: SymbolConfig, b: SymbolConfig) => b.volumeRaw - a.volumeRaw); // FIXED: Added types
+          .sort((a: SymbolConfig, b: SymbolConfig) => b.volumeRaw - a.volumeRaw);
 
         const topSymbols = showAll ? mappedSymbols : mappedSymbols.slice(0, 50);
         setSymbols(topSymbols);
