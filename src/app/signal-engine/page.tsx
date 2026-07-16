@@ -928,22 +928,13 @@ export default function SignalEnginePage() {
                           </button>
                           <div className="flex items-center gap-1 shrink-0">
                             {signal.status === 'pending' && (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => void handleExecuteSignal(signal, 'paper')}
-                                  disabled={executingSignalId === signal.id}
-                                  className="px-2 py-1 text-[11px] font-semibold rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
-                                >
-                                  {executingSignalId === signal.id ? <Loader2 size={12} className="animate-spin" /> : 'Paper'}
-                                </button>
-                                <button
-                                  onClick={() => void handleExecuteSignal(signal, 'live')}
-                                  disabled={executingSignalId === signal.id}
-                                  className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
-                                >
-                                  {executingSignalId === signal.id ? <Loader2 size={12} className="animate-spin" /> : 'Live'}
-                                </button>
-                              </div>
+                              <button
+                                onClick={() => void handleExecuteSignal(signal, 'live')}
+                                disabled={executingSignalId === signal.id}
+                                className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+                              >
+                                {executingSignalId === signal.id ? <Loader2 size={12} className="animate-spin" /> : 'Live'}
+                              </button>
                             )}
                             <button
                               onClick={() => setExpandedId(isExpanded ? null : signal.id)}
