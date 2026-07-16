@@ -4,6 +4,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { realtimeManager } from '@/lib/realtimeManager';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, placeBybitOrder, safeJsonParse } from '@/lib/bybit';
+import { calculateLivePnl, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
+import { writeLiveTrades, readLiveTrades } from '@/lib/liveTrades';
 import { 
   Activity, Search, Download, ChevronUp, ChevronDown,
   Wifi, WifiOff, RefreshCw, AlertCircle, X, Filter,
@@ -35,6 +39,7 @@ interface Trade {
   orderId?: string;
   tradeType?: 'market' | 'limit';
   positionIdx?: number;
+  source?: 'paper' | 'live' | 'bybit';
 }
 
 interface Position {
@@ -52,39 +57,47 @@ interface Position {
 type SortKey = keyof Trade;
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT'];
 
 // ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
+const getApiCredentials = () => getBybitCredentials();
 
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
+const readPaperTrades = (): any[] => {
+  if (typeof window === 'undefined') return [];
   try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
+    return JSON.parse(window.localStorage.getItem('paper_trades') || '[]');
   } catch {
-    return null;
+    return [];
   }
 };
 
-const formatPrice = (price: number): string => {
-  if (price >= 1000) return price.toFixed(2);
-  if (price >= 1) return price.toFixed(4);
-  return price.toFixed(6);
+const formatPrice = (price: number | null | undefined): string => {
+  const safePrice = Number.isFinite(price as number) ? Number(price) : 0;
+  if (safePrice >= 1000) return safePrice.toFixed(2);
+  if (safePrice >= 1) return safePrice.toFixed(4);
+  return safePrice.toFixed(6);
+};
+
+const calculateTradePnl = (trade: any, currentPrice: number | null) => {
+  const entryPrice = Number.isFinite(parseFloat(trade.entryPrice || '0')) ? parseFloat(trade.entryPrice || '0') : 0;
+  const size = Number.isFinite(parseFloat(trade.size || '0')) ? parseFloat(trade.size || '0') : 0;
+  const existingPnl = Number.isFinite(parseFloat(trade.pnl || '0')) ? parseFloat(trade.pnl || '0') : 0;
+  const existingPnlPct = Number.isFinite(parseFloat(trade.pnlPct || '0')) ? parseFloat(trade.pnlPct || '0') : 0;
+
+  if (!currentPrice || !entryPrice || !size) {
+    return { pnl: existingPnl, pnlPct: existingPnlPct };
+  }
+
+  const move = trade.side === 'LONG' ? currentPrice - entryPrice : entryPrice - currentPrice;
+  const pnl = move * size;
+  const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * size)) * 100 : 0;
+
+  return {
+    pnl: Math.round(pnl * 100) / 100,
+    pnlPct: Math.round(pnlPct * 10) / 10,
+  };
 };
 
 // ============== API FUNCTIONS ==============
@@ -92,25 +105,13 @@ const formatPrice = (price: number): string => {
 // Fetch positions
 const fetchPositions = async (): Promise<Position[]> => {
   try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) return [];
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
-      method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+    const response = await fetch('/api/bybit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: '/v5/position/list', method: 'GET' }),
     });
 
-    const data = await safeJsonParse(response);
+    const data = await response.json();
     const positions: Position[] = [];
 
     if (data?.retCode === 0 && data?.result?.list) {
@@ -142,37 +143,25 @@ const fetchPositions = async (): Promise<Position[]> => {
 // Fetch order history
 const fetchOrderHistory = async (): Promise<Trade[]> => {
   try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) return [];
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const params = 'category=linear&limit=100';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/order/history?${params}`, {
-      method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+    const response = await fetch('/api/bybit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: '/v5/order/history?settleCoin=USDT', method: 'GET' }),
     });
 
-    const data = await safeJsonParse(response);
+    const data = await response.json();
     const trades: Trade[] = [];
 
     if (data?.retCode === 0 && data?.result?.list) {
       data.result.list.forEach((order: any) => {
         if (order.orderStatus === 'Filled') {
           const side = order.side === 'Buy' ? 'LONG' : 'SHORT';
-          const entryPrice = parseFloat(order.price);
-          const size = parseFloat(order.qty);
+          const entryPrice = parseFloat(order.avgPrice || order.price || order.lastPrice || '0');
+          const size = parseFloat(order.qty || '0');
           const pnl = parseFloat(order.pnl || 0);
-          const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * size)) * 100 : 0;
-          const createdTime = parseInt(order.createdTime);
-          const updatedTime = parseInt(order.updatedTime || order.createdTime);
+          const pnlPct = entryPrice > 0 && size > 0 ? (pnl / (entryPrice * size)) * 100 : 0;
+          const createdTime = parseInt(order.createdTime || order.createdTimeMs || '0', 10) || Date.now();
+          const updatedTime = parseInt(order.updatedTime || order.updatedTimeMs || order.createdTime || '0', 10) || createdTime;
           const duration = updatedTime > createdTime ? 
             `${Math.floor((updatedTime - createdTime) / 60000)}m` : '0m';
 
@@ -181,7 +170,7 @@ const fetchOrderHistory = async (): Promise<Trade[]> => {
             symbol: order.symbol,
             side,
             entryPrice: Math.round(entryPrice * 10000) / 10000,
-            exitPrice: Math.round(parseFloat(order.price) * 10000) / 10000,
+            exitPrice: Math.round((parseFloat(order.avgPrice || order.price || order.lastPrice || '0')) * 10000) / 10000,
             size: Math.abs(size),
             pnl: Math.round(pnl * 100) / 100,
             pnlPct: Math.round(pnlPct * 10) / 10,
@@ -195,11 +184,11 @@ const fetchOrderHistory = async (): Promise<Trade[]> => {
             entryTimestamp: createdTime,
             exitTimestamp: updatedTime,
             status: 'closed',
-            leverage: parseFloat(order.leverage || 5),
+            leverage: parseFloat(order.leverage || '5'),
             liquidationPrice: entryPrice * 0.95,
             orderId: order.orderId,
             tradeType: order.orderType === 'Market' ? 'market' : 'limit',
-            positionIdx: parseInt(order.positionIdx || 0),
+            positionIdx: parseInt(order.positionIdx || '0', 10),
           });
         }
       });
@@ -216,8 +205,12 @@ const fetchOrderHistory = async (): Promise<Trade[]> => {
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
     const promises = symbols.map(symbol =>
-      fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+      fetch('/api/bybit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: `/v5/market/tickers?category=linear&symbol=${symbol}`, method: 'GET' }),
+      })
+        .then((r) => r.json())
         .catch(() => null)
     );
     
@@ -238,6 +231,20 @@ const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => 
   }
 };
 
+const getCurrentPrice = async (symbol: string): Promise<number | null> => {
+  try {
+    const response = await fetch('/api/bybit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: `/v5/market/tickers?category=linear&symbol=${symbol}`, method: 'GET' }),
+    });
+    const data = await response.json();
+    return parseFloat(data?.result?.list?.[0]?.lastPrice || '0');
+  } catch {
+    return null;
+  }
+};
+
 // Execute trade
 const executeTradeOnBybit = async (
   symbol: string, 
@@ -251,61 +258,8 @@ const executeTradeOnBybit = async (
       return { success: false, error: 'API credentials not configured' };
     }
 
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-
-    // Set leverage
-    const leverageParams = `category=linear&symbol=${symbol}&buyLeverage=${leverage}&sellLeverage=${leverage}`;
-    const leverageSignature = generateSignature(apiSecret, timestamp, recvWindow, leverageParams);
-    
-    await fetch(`${BYBIT_BASE_URL}/v5/position/set-leverage`, {
-      method: 'POST',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': leverageSignature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        category: 'linear',
-        symbol,
-        buyLeverage: leverage.toString(),
-        sellLeverage: leverage.toString(),
-      }),
-    });
-
-    // Place order
-    const orderSide = side === 'LONG' ? 'Buy' : 'Sell';
-    const orderParams = `category=linear&symbol=${symbol}&side=${orderSide}&orderType=Market&qty=${size}&timeInForce=GTC`;
-    const orderSignature = generateSignature(apiSecret, timestamp, recvWindow, orderParams);
-    
-    const orderResponse = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
-      method: 'POST',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': orderSignature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        category: 'linear',
-        symbol,
-        side: orderSide,
-        orderType: 'Market',
-        qty: size.toString(),
-        timeInForce: 'GTC',
-      }),
-    });
-
-    const data = await safeJsonParse(orderResponse);
-    
-    if (data?.retCode === 0) {
-      return { success: true, orderId: data.result?.orderId };
-    } else {
-      return { success: false, error: data?.retMsg || 'Unknown error' };
-    }
+    const orderResult = await placeBybitOrder({ symbol, side, qty: size, leverage, apiKey, apiSecret });
+    return orderResult;
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to execute trade' };
   }
@@ -319,39 +273,21 @@ const closePositionOnBybit = async (symbol: string, positionIdx: number, size: n
       return { success: false, error: 'API credentials not configured' };
     }
 
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const orderSide = side === 'LONG' ? 'Sell' : 'Buy';
-    const params = `category=linear&symbol=${symbol}&side=${orderSide}&orderType=Market&qty=${size}&timeInForce=GTC&positionIdx=${positionIdx}`;
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-    
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
-      method: 'POST',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        category: 'linear',
-        symbol,
-        side: orderSide,
-        orderType: 'Market',
-        qty: size.toString(),
-        timeInForce: 'GTC',
-        positionIdx: positionIdx,
-      }),
+    const closeSide = side === 'LONG' ? 'SHORT' : 'LONG';
+    const orderResult = await placeBybitOrder({
+      symbol,
+      side: closeSide,
+      qty: size,
+      leverage: 5,
+      positionIdx,
+      apiKey,
+      apiSecret,
     });
 
-    const data = await safeJsonParse(response);
-    
-    if (data?.retCode === 0) {
-      return { success: true };
-    } else {
-      return { success: false, error: data?.retMsg || 'Unknown error' };
-    }
+    return {
+      success: orderResult.success,
+      error: orderResult.error,
+    };
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to close position' };
   }
@@ -370,6 +306,14 @@ export default function TradeLogsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('connecting');
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSharedTradingState((state) => {
+      const merged = [...state.trades.paper, ...state.trades.live];
+      setTrades(merged as any);
+    });
+    return unsubscribe;
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -396,11 +340,60 @@ export default function TradeLogsPage() {
       setError(null);
 
       const hasKeys = hasValidCredentials();
-      
+      const paperTrades = readPaperTrades();
+      const localLiveTrades = readLiveTrades();
+      const allSymbols = Array.from(new Set(
+        [...paperTrades, ...localLiveTrades]
+          .map((trade: any) => trade.symbol)
+          .filter(Boolean)
+      ));
+      const tickerData = await fetchTickers(allSymbols);
+
+      const paperEntries = paperTrades.map((trade: any) => {
+        const currentPrice = trade.symbol ? parseFloat(tickerData[trade.symbol]?.lastPrice || '0') : null;
+        const { pnl, pnlPct } = calculateTradePnl(trade, currentPrice);
+
+        return {
+          ...trade,
+          entryPrice: parseFloat(trade.entryPrice || 0),
+          exitPrice: parseFloat(trade.exitPrice || trade.entryPrice || 0),
+          size: parseFloat(trade.size || 0.001),
+          pnl,
+          pnlPct,
+          status: trade.status || 'open',
+          entryTimestamp: trade.entryTimestamp || Date.now(),
+          exitTimestamp: trade.exitTimestamp || Date.now(),
+          source: 'paper',
+        } as Trade;
+      });
+
+      const liveEntries = localLiveTrades.map((trade: any) => {
+        const currentPrice = trade.symbol ? parseFloat(tickerData[trade.symbol]?.lastPrice || '0') : null;
+        const { pnl, pnlPct } = calculateTradePnl(trade, currentPrice);
+
+        return {
+          ...trade,
+          entryPrice: parseFloat(trade.entryPrice || 0),
+          exitPrice: parseFloat(trade.exitPrice || trade.entryPrice || 0),
+          size: parseFloat(trade.size || 0.001),
+          pnl,
+          pnlPct,
+          status: trade.status || 'open',
+          entryTimestamp: trade.entryTimestamp || Date.now(),
+          exitTimestamp: trade.exitTimestamp || Date.now(),
+          source: 'live',
+        } as Trade;
+      });
+
+      if (typeof window !== 'undefined' && liveEntries.length > 0) {
+        window.localStorage.setItem('live_trades', JSON.stringify(liveEntries));
+      }
+
       if (!hasKeys) {
         setIsApiConnected(false);
-        setIsLoading(false);
-        setError('API credentials not configured. Please add them to .env.local');
+        setPositions([]);
+        setTrades([...paperEntries, ...liveEntries]);
+        setLastUpdate(new Date());
         return;
       }
 
@@ -410,8 +403,22 @@ export default function TradeLogsPage() {
         fetchOrderHistory(),
       ]);
 
-      setPositions(positionData);
-      setTrades(tradeData);
+      const livePositions = positionData.map((pos) => {
+        const currentPrice = parseFloat(tickerData[pos.symbol]?.lastPrice || pos.markPrice || pos.entryPrice || '0');
+        const { pnl, pnlPct } = calculateLivePnl(pos.entryPrice, currentPrice, pos.size, pos.side);
+        return {
+          ...pos,
+          markPrice: Number.isFinite(currentPrice) ? currentPrice : pos.markPrice,
+          unrealisedPnl: pnl,
+          pnlPct,
+        };
+      });
+
+      const mergedTrades = [...paperEntries, ...liveEntries, ...tradeData];
+      setPositions(livePositions as any);
+      setTrades(mergedTrades);
+      setSharedTrades('paper', paperTrades as any);
+      setSharedTrades('live', liveEntries as any);
       setIsApiConnected(true);
       setLastUpdate(new Date());
 
@@ -424,74 +431,19 @@ export default function TradeLogsPage() {
   }, [hasValidCredentials]);
 
   // Connect WebSocket
-  const connectWebSocket = useCallback(() => {
-    try {
-      setConnectionStatus('connecting');
-      
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        setError(null);
-        
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-        
-        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ op: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            fetchTradeData();
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setConnectionStatus('error');
-      };
-
-      ws.onclose = () => {
-        setConnectionStatus('disconnected');
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      setConnectionStatus('error');
-    }
+  // Use singleton realtime manager for ticks to avoid multiple WS connections
+  useEffect(() => {
+    setConnectionStatus('connecting');
+    const unsubscribe = realtimeManager.subscribeTicks(() => {
+      // On any tick, refresh local trade data (debounced by fetchTradeData as needed)
+      fetchTradeData();
+    });
+    setConnectionStatus('connected');
+    return () => { unsubscribe(); };
   }, [fetchTradeData]);
 
   const disconnectWebSocket = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
+    // no-op: realtimeManager controls websocket lifecycle
   }, []);
 
   // Execute trade
@@ -538,23 +490,27 @@ export default function TradeLogsPage() {
   // Initialize
   useEffect(() => {
     fetchTradeData();
-    connectWebSocket();
+
+    const handleTradeUpdate = () => {
+      fetchTradeData();
+    };
+
+    window.addEventListener('bybit-trades-updated', handleTradeUpdate);
 
     const interval = setInterval(() => {
-      if (connectionStatus === 'disconnected') {
-        fetchTradeData();
-      }
+      // fallback periodic refresh
+      fetchTradeData();
     }, 60000);
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
+      window.removeEventListener('bybit-trades-updated', handleTradeUpdate);
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
         heartbeatIntervalRef.current = null;
       }
     };
-  }, [fetchTradeData, connectWebSocket, disconnectWebSocket]);
+  }, [fetchTradeData]);
 
   // Export trades
   const handleExport = () => {
@@ -622,9 +578,9 @@ export default function TradeLogsPage() {
       return String(av).localeCompare(String(bv)) * dir;
     });
 
-  const totalPnl = filtered.reduce((s, t) => s + t.pnl, 0);
-  const wins = filtered.filter((t) => t.pnl > 0).length;
-  const losses = filtered.filter((t) => t.pnl < 0).length;
+  const totalPnl = filtered.reduce((s, t) => s + (Number.isFinite(t.pnl) ? t.pnl : 0), 0);
+  const wins = filtered.filter((t) => Number.isFinite(t.pnl) && t.pnl > 0).length;
+  const losses = filtered.filter((t) => Number.isFinite(t.pnl) && t.pnl < 0).length;
   const winRate = filtered.length > 0 ? ((wins / filtered.length) * 100).toFixed(1) : '0.0';
   const avgPnl = filtered.length > 0 ? totalPnl / filtered.length : 0;
 
@@ -698,7 +654,7 @@ export default function TradeLogsPage() {
               </span>
               {connectionStatus === 'error' && (
                 <button
-                  onClick={() => { disconnectWebSocket(); setTimeout(connectWebSocket, 1000); }}
+                  onClick={() => { realtimeManager.triggerRefresh(); }}
                   className="ml-1 text-blue-600 dark:text-blue-400 hover:underline"
                 >
                   Reconnect
@@ -993,6 +949,7 @@ export default function TradeLogsPage() {
                     { key: 'confidence' as SortKey, label: 'Conf.' },
                     { key: 'regime' as SortKey, label: 'Regime' },
                     { key: 'duration' as SortKey, label: 'Duration' },
+                    { key: 'source' as SortKey, label: 'Source' },
                     { key: 'exitReason' as SortKey, label: 'Exit Reason' },
                   ].map(({ key, label }) => (
                     <th
@@ -1044,11 +1001,11 @@ export default function TradeLogsPage() {
                       {trade.exitPrice ? `$${formatPrice(trade.exitPrice)}` : '-'}
                     </td>
                     <td className={`px-3 py-2.5 font-mono text-xs font-bold ${
-                      trade.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                      (trade.pnl ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                     }`}>
-                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
+                      {(trade.pnl ?? 0) >= 0 ? '+' : ''}${(trade.pnl ?? 0).toFixed(2)}
                       <span className="text-[10px] ml-1 opacity-70">
-                        ({trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(1)}%)
+                        ({(trade.pnlPct ?? 0) >= 0 ? '+' : ''}{(trade.pnlPct ?? 0).toFixed(1)}%)
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
@@ -1065,6 +1022,15 @@ export default function TradeLogsPage() {
                     </td>
                     <td className="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400 font-mono">
                       {trade.duration || '-'}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium capitalize ${
+                        trade.source === 'paper' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' :
+                        trade.source === 'live' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                        'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                      }`}>
+                        {trade.source || 'bybit'}
+                      </span>
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`text-xs px-1.5 py-0.5 rounded ${

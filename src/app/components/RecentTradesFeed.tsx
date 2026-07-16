@@ -3,6 +3,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import { realtimeManager } from '@/lib/realtimeManager';
 import { CheckCircle2, XCircle, Target, Clock, Loader2, RefreshCw } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
 
@@ -44,34 +46,12 @@ const OUTCOME_COLOR = {
 };
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
 
 // ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const getApiCredentials = () => getBybitCredentials();
 
 // ============== API FUNCTIONS ==============
 
@@ -81,19 +61,13 @@ const fetchOrderHistory = async (): Promise<any[]> => {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return [];
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = 'category=linear&limit=50';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/order/history?${params}`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -113,19 +87,13 @@ const fetchPositions = async (): Promise<any[]> => {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return [];
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -275,112 +243,49 @@ export default function RecentTradesFeed() {
     }
   };
 
-  // Connect WebSocket for real-time updates
-  const connectWebSocket = () => {
-    try {
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('RecentTrades WebSocket connected');
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-        startHeartbeat();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            const ticker = data.data;
-            if (ticker && ticker.symbol) {
-              const price = parseFloat(ticker.lastPrice);
-              setTrades(prev => prev.map(trade => {
-                if (trade.status === 'open' && trade.symbol === ticker.symbol) {
-                  const pnl = trade.direction === 'long'
-                    ? (price - trade.entryPrice) * trade.size
-                    : (trade.entryPrice - price) * trade.size;
-                  const pnlPct = trade.entryPrice > 0 ? (pnl / (trade.entryPrice * trade.size)) * 100 : 0;
-
-                  return {
-                    ...trade,
-                    exitPrice: Math.round(price * 10000) / 10000,
-                    pnl: Math.round(pnl * 100) / 100,
-                    pnlPct: Math.round(pnlPct * 10) / 10,
-                    holdMins: Math.floor((Date.now() - trade.timestamp) / 60000),
-                  };
-                }
-                return trade;
-              }));
-            }
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        console.warn('RecentTrades WebSocket error');
-      };
-
-      ws.onclose = () => {
-        console.log('RecentTrades WebSocket disconnected');
-        stopHeartbeat();
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      console.error('Failed to connect RecentTrades WebSocket:', err);
-    }
-  };
-
-  const startHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-    }
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ op: 'ping' }));
-      }
-    }, 30000);
-  };
-
-  const stopHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  };
+  // Subscribe to singleton ticks instead of opening a dedicated WebSocket
 
   const disconnectWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Normal closure');
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    stopHeartbeat();
+    // noop: realtimeManager controls WS lifecycle
   };
 
   useEffect(() => {
     fetchTrades();
-    connectWebSocket();
+
+    const unsubscribe = realtimeManager.subscribeTicks((ticker: any) => {
+      try {
+        if (ticker && ticker.symbol) {
+          const price = parseFloat(ticker.lastPrice || '0');
+          setTrades(prev => prev.map(trade => {
+            if (trade.status === 'open' && trade.symbol === ticker.symbol) {
+              const pnl = trade.direction === 'long'
+                ? (price - trade.entryPrice) * trade.size
+                : (trade.entryPrice - price) * trade.size;
+              const pnlPct = trade.entryPrice > 0 ? (pnl / (trade.entryPrice * trade.size)) * 100 : 0;
+
+              return {
+                ...trade,
+                exitPrice: Math.round(price * 10000) / 10000,
+                pnl: Math.round(pnl * 100) / 100,
+                pnlPct: Math.round(pnlPct * 10) / 10,
+                holdMins: Math.floor((Date.now() - trade.timestamp) / 60000),
+              };
+            }
+            return trade;
+          }));
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
 
     const interval = setInterval(() => {
-      if (!isRefreshing) {
-        fetchTrades();
-      }
+      if (!isRefreshing) fetchTrades();
     }, 30000);
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
+      unsubscribe();
     };
   }, []);
 

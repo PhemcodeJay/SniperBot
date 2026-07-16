@@ -13,9 +13,8 @@ import {
   CartesianGrid,
   Cell,
   ReferenceLine,
-  Loader2,
 } from 'recharts';
-import { AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface ConfidenceData {
   bucket: string;

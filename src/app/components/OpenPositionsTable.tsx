@@ -2,7 +2,10 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+// ============== IMPORTS ==============
+import React, { useState, useEffect } from 'react';
+import { realtimeManager } from '@/lib/realtimeManager';
+import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 import { X, TrendingUp, TrendingDown, ChevronUp, ChevronDown, Loader2, RefreshCw, Plus, Minus } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -34,246 +37,17 @@ interface Position {
 
 type SortKey = 'symbol' | 'unrealizedPnl' | 'confidence' | 'holdMins';
 
-// ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
-const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
-
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
-
-// ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
-
-// ============== API FUNCTIONS ==============
-
-// Fetch real positions from Bybit
-const fetchRealPositions = async (): Promise<Position[]> => {
-  try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) return [];
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
-      method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
-    });
-
-    const data = await safeJsonParse(response);
-    const positions: Position[] = [];
-
-    if (data?.retCode === 0 && data?.result?.list) {
-      data.result.list.forEach((pos: any) => {
-        const size = parseFloat(pos.size);
-        if (size !== 0) {
-          const side = pos.side === 'Buy' ? 'long' : 'short';
-          const entryPrice = parseFloat(pos.avgPrice);
-          const currentPrice = parseFloat(pos.markPrice);
-          const pnl = parseFloat(pos.unrealisedPnl || 0);
-          const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
-          const createdTime = parseInt(pos.createdTime);
-          const holdMins = Math.floor((Date.now() - createdTime) / 60000);
-
-          positions.push({
-            id: `pos-${pos.symbol}-${pos.positionIdx}`,
-            symbol: pos.symbol,
-            direction: side,
-            entryPrice: Math.round(entryPrice * 10000) / 10000,
-            currentPrice: Math.round(currentPrice * 10000) / 10000,
-            size: Math.abs(size),
-            leverage: parseFloat(pos.leverage || 5),
-            unrealizedPnl: Math.round(pnl * 100) / 100,
-            unrealizedPct: Math.round(pnlPct * 10) / 10,
-            stopLoss: parseFloat(pos.stopLoss || 0),
-            takeProfit1: parseFloat(pos.takeProfit || 0),
-            takeProfit2: parseFloat(pos.takeProfit || 0) * 1.1,
-            atr: currentPrice * 0.01,
-            confidence: Math.min(95, 75 + Math.random() * 20),
-            regime: Math.random() > 0.5 ? 'trending' : 'ranging',
-            openedAt: new Date(createdTime).toLocaleTimeString(),
-            holdMins: Math.max(0, holdMins),
-            positionIdx: parseInt(pos.positionIdx || 0),
-            orderId: pos.orderId,
-            accountType: 'Unified',
-          });
-        }
-      });
-    }
-
-    return positions;
-  } catch (error) {
-    console.error('Error fetching positions:', error);
-    return [];
-  }
-};
-
-// Open position on Bybit
-const openPositionOnBybit = async (
-  symbol: string,
-  side: 'long' | 'short',
-  size: number,
-  leverage: number
-): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) {
-      return { success: false, error: 'API credentials not configured' };
-    }
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-
-    // Set leverage
-    const leverageParams = `category=linear&symbol=${symbol}&buyLeverage=${leverage}&sellLeverage=${leverage}`;
-    const leverageSignature = generateSignature(apiSecret, timestamp, recvWindow, leverageParams);
-
-    await fetch(`${BYBIT_BASE_URL}/v5/position/set-leverage`, {
-      method: 'POST',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': leverageSignature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        category: 'linear',
-        symbol,
-        buyLeverage: leverage.toString(),
-        sellLeverage: leverage.toString(),
-      }),
-    });
-
-    // Place order
-    const orderSide = side === 'long' ? 'Buy' : 'Sell';
-    const orderParams = `category=linear&symbol=${symbol}&side=${orderSide}&orderType=Market&qty=${size}&timeInForce=GTC`;
-    const orderSignature = generateSignature(apiSecret, timestamp, recvWindow, orderParams);
-
-    const orderResponse = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
-      method: 'POST',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': orderSignature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        category: 'linear',
-        symbol,
-        side: orderSide,
-        orderType: 'Market',
-        qty: size.toString(),
-        timeInForce: 'GTC',
-      }),
-    });
-
-    const data = await safeJsonParse(orderResponse);
-    if (data?.retCode === 0) {
-      return { success: true };
-    } else {
-      return { success: false, error: data?.retMsg || 'Unknown error' };
-    }
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Failed to open position' };
-  }
-};
-
-// Close position on Bybit
-const closePositionOnBybit = async (position: Position): Promise<boolean> => {
-  try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) return false;
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const side = position.direction === 'long' ? 'Sell' : 'Buy';
-    const params = `category=linear&symbol=${position.symbol}&side=${side}&orderType=Market&qty=${position.size}&timeInForce=GTC&positionIdx=${position.positionIdx || 0}`;
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
-      method: 'POST',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        category: 'linear',
-        symbol: position.symbol,
-        side,
-        orderType: 'Market',
-        qty: position.size.toString(),
-        timeInForce: 'GTC',
-        positionIdx: position.positionIdx || 0,
-      }),
-    });
-
-    const data = await safeJsonParse(response);
-    return data?.retCode === 0;
-  } catch (error) {
-    console.error('Error closing position:', error);
-    return false;
-  }
-};
-
-// Fetch ticker data for real-time price updates
-const fetchTicker = async (symbol: string): Promise<any> => {
-  try {
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`);
-    const data = await safeJsonParse(response);
-    if (data?.retCode === 0 && data?.result?.list?.[0]) {
-      return data.result.list[0];
-    }
-    return null;
-  } catch (error) {
-    console.error('Error fetching ticker:', error);
-    return null;
-  }
-};
 
 // ============== COMPONENT ==============
 
 export default function OpenPositionsTable() {
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: realtimeData, loading: isLoading, error: apiError, refetch } = useSharedRealtimeData();
+  
   const [sortKey, setSortKey] = useState<SortKey>('unrealizedPnl');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [closeTarget, setCloseTarget] = useState<Position | null>(null);
-  const [portfolioHeat, setPortfolioHeat] = useState(0);
-  const [isApiConnected, setIsApiConnected] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
 
   // New position form state
@@ -282,152 +56,75 @@ export default function OpenPositionsTable() {
   const [tradeSize, setTradeSize] = useState(0.001);
   const [tradeLeverage, setTradeLeverage] = useState(5);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Transform real-time positions to component format
+  const positions: Position[] = (realtimeData?.positions || [])
+    .filter(pos => parseFloat(pos.size) !== 0)
+    .map((pos: any) => {
+      const size = parseFloat(pos.size);
+      const side = pos.side === 'Buy' ? 'long' : 'short';
+      const entryPrice = parseFloat(pos.avgPrice || pos.entryPrice || 0);
+      const currentPrice = parseFloat(pos.markPrice || pos.currentPrice || 0);
+      const unrealizedPnl = parseFloat(pos.unrealisedPnl || 0);
+      const unrealizedPct = entryPrice > 0 ? (unrealizedPnl / (entryPrice * Math.abs(size))) * 100 : 0;
+      const createdTime = parseInt(pos.createdTime || Date.now());
+      const holdMins = Math.floor((Date.now() - createdTime) / 60000);
 
-  // Fetch positions
-  const fetchPositions = async () => {
+      return {
+        id: `pos-${pos.symbol}-${pos.positionIdx || 0}`,
+        symbol: pos.symbol,
+        direction: side,
+        entryPrice,
+        currentPrice,
+        size: Math.abs(size),
+        leverage: parseFloat(pos.leverage || 5),
+        unrealizedPnl,
+        unrealizedPct,
+        stopLoss: parseFloat(pos.stopLoss || 0),
+        takeProfit1: parseFloat(pos.takeProfit || 0),
+        takeProfit2: parseFloat(pos.takeProfit || 0),
+        atr: 0,
+        confidence: 75 + Math.random() * 20,
+        regime: 'trending' as const,
+        openedAt: new Date(createdTime).toLocaleString(),
+        holdMins,
+        positionIdx: parseInt(pos.positionIdx || 0),
+        orderId: pos.orderId,
+      };
+    });
+
+  const portfolioHeat = positions.reduce((heat, pos) => {
+    return heat + (pos.unrealizedPct > 0 ? pos.unrealizedPct : 0);
+  }, 0);
+
+  const isApiConnected = !apiError && realtimeData && true;
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
-      setIsRefreshing(true);
-      setError(null);
-
-      const { apiKey, apiSecret } = getApiCredentials();
-      const hasKeys = !!(apiKey && apiSecret);
-
-      if (!hasKeys) {
-        setIsApiConnected(false);
-        setPositions([]);
-        setPortfolioHeat(0);
-        return;
-      }
-
-      const positionData = await fetchRealPositions();
-      setPositions(positionData);
-
-      // Calculate portfolio heat
-      let totalExposure = 0;
-      positionData.forEach(pos => {
-        totalExposure += Math.abs(pos.unrealizedPnl) / 1000;
-      });
-      setPortfolioHeat(Math.min(10, totalExposure / 1000));
-
-      setIsApiConnected(true);
-    } catch (err: any) {
-      console.error('Error fetching positions:', err);
-      setError(err.message || 'Failed to fetch positions');
+      await refetch();
     } finally {
-      setIsLoading(false);
       setIsRefreshing(false);
     }
   };
-
-  // Connect WebSocket for real-time updates
-  const connectWebSocket = () => {
-    try {
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('OpenPositions WebSocket connected');
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-        startHeartbeat();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            const ticker = data.data;
-            if (ticker && ticker.symbol) {
-              const price = parseFloat(ticker.lastPrice);
-              setPositions(prev => prev.map(pos => {
-                if (pos.symbol === ticker.symbol) {
-                  const pnl = pos.direction === 'long'
-                    ? (price - pos.entryPrice) * pos.size
-                    : (pos.entryPrice - price) * pos.size;
-                  const pnlPct = pos.entryPrice > 0 ? (pnl / (pos.entryPrice * pos.size)) * 100 : 0;
-
-                  return {
-                    ...pos,
-                    currentPrice: Math.round(price * 10000) / 10000,
-                    unrealizedPnl: Math.round(pnl * 100) / 100,
-                    unrealizedPct: Math.round(pnlPct * 10) / 10,
-                    holdMins: Math.floor((Date.now() - new Date(pos.openedAt).getTime()) / 60000),
-                  };
-                }
-                return pos;
-              }));
-            }
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        console.warn('OpenPositions WebSocket error');
-      };
-
-      ws.onclose = () => {
-        console.log('OpenPositions WebSocket disconnected');
-        stopHeartbeat();
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      console.error('Failed to connect OpenPositions WebSocket:', err);
-    }
-  };
-
-  const startHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-    }
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ op: 'ping' }));
-      }
-    }, 30000);
-  };
-
-  const stopHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  };
-
-  const disconnectWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Normal closure');
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    stopHeartbeat();
-  };
-
+  // Use centralized realtime manager instead of per-component WebSocket.
   useEffect(() => {
-    fetchPositions();
-    connectWebSocket();
+    // initial data load
+    refetch();
+
+    // Subscribe to manager data updates to refresh this view
+    const unsubscribe = realtimeManager.subscribeData(() => {
+      refetch();
+    });
 
     const interval = setInterval(() => {
       if (!isRefreshing) {
-        fetchPositions();
+        refetch();
       }
     }, 30000);
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
+      if (unsubscribe) unsubscribe();
     };
   }, []);
 

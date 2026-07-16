@@ -4,11 +4,13 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
 import { 
   Shield, Save, AlertTriangle, RotateCcw, CheckCircle, 
   Info, Zap, TrendingDown, Settings, Lock, Unlock,
   Clock, Database, Loader2, Wifi, WifiOff, X
 } from 'lucide-react';
+import { realtimeManager } from '@/lib/realtimeManager';
 
 interface RiskRules {
   perTradeRisk: number;
@@ -80,34 +82,12 @@ const DEFAULT_RULES: RiskRules = {
 };
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
 
 // ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const getApiCredentials = () => getBybitCredentials();
 
 // ============== API FUNCTIONS ==============
 
@@ -119,19 +99,13 @@ const fetchWalletBalance = async (): Promise<{ totalEquity: number; availableBal
       return { totalEquity: 100, availableBalance: 100 };
     }
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -155,19 +129,13 @@ const fetchPositions = async (): Promise<any[]> => {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return [];
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const params = 'category=linear&accountType=UNIFIED';
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list?${params}`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -340,85 +308,19 @@ export default function RiskRulesPage() {
     }
   }, [rules.perTradeRisk, rules.maxDailyLoss]);
 
-  // Connect WebSocket
-  const connectWebSocket = useCallback(() => {
-    try {
-      setConnectionStatus('connecting');
-      
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        setError(null);
-        
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-        
-        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ op: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            const ticker = data.data;
-            if (ticker && ticker.symbol) {
-              setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
-              fetchMarketDataAndAssessRisk();
-            }
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setConnectionStatus('error');
-      };
-
-      ws.onclose = () => {
-        setConnectionStatus('disconnected');
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      setConnectionStatus('error');
-    }
-  }, [fetchMarketDataAndAssessRisk]);
-
-  const disconnectWebSocket = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  }, []);
+  const disconnectWebSocket = useCallback(() => { /* noop - singleton handles websocket */ }, []);
 
   // Initialize
   useEffect(() => {
     fetchMarketDataAndAssessRisk();
-    connectWebSocket();
+    const unsubscribe = realtimeManager.subscribeTicks((ticker: any) => {
+      try {
+        if (ticker && ticker.symbol) {
+          setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
+          fetchMarketDataAndAssessRisk();
+        }
+      } catch (e) { /* ignore */ }
+    });
 
     const interval = setInterval(() => {
       if (connectionStatus === 'disconnected') {
@@ -428,13 +330,9 @@ export default function RiskRulesPage() {
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
-      if (heartbeatIntervalRef.current) {
-        clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = null;
-      }
+      unsubscribe();
     };
-  }, [fetchMarketDataAndAssessRisk, connectWebSocket, disconnectWebSocket]);
+  }, [fetchMarketDataAndAssessRisk]);
 
   // Save rules
   const handleSave = () => {

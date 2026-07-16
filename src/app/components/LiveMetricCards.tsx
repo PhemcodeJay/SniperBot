@@ -1,8 +1,10 @@
 // app/components/LiveMetricCards.tsx
 
-'use client';
+"use client";
 
 import React, { useState, useEffect } from 'react';
+import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
+import { getSharedTradingState, subscribeToSharedTradingState } from '@/lib/tradingState';
 import {
   TrendingUp,
   TrendingDown,
@@ -36,115 +38,6 @@ interface LiveMetrics {
   sharpe: { ratio: number; sortino: number };
   drawdown: { used: number; limit: number; remaining: number };
 }
-
-// ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
-
-// ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
-
-// ============== API FUNCTIONS ==============
-
-// Fetch real balance
-const fetchRealBalance = async (): Promise<number> => {
-  try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) return 100;
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
-      method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
-    });
-
-    const data = await safeJsonParse(response);
-    if (data?.retCode === 0 && data?.result?.list?.[0]) {
-      const totalEquity = parseFloat(data.result.list[0].totalEquity || '0');
-      if (totalEquity > 0) return totalEquity;
-    }
-    return 100;
-  } catch (error) {
-    console.error('Error fetching balance:', error);
-    return 100;
-  }
-};
-
-// Fetch ticker data
-const fetchTicker = async (symbol: string = 'BTCUSDT'): Promise<any> => {
-  try {
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`);
-    const data = await safeJsonParse(response);
-    if (data?.retCode === 0 && data?.result?.list?.[0]) {
-      return data.result.list[0];
-    }
-    return null;
-  } catch (error) {
-    console.error('Error fetching ticker:', error);
-    return null;
-  }
-};
-
-// Fetch positions count
-const fetchPositionsCount = async (): Promise<number> => {
-  try {
-    const { apiKey, apiSecret } = getApiCredentials();
-    if (!apiKey || !apiSecret) return 0;
-
-    const timestamp = Date.now().toString();
-    const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
-
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
-      method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
-    });
-
-    const data = await safeJsonParse(response);
-    if (data?.retCode === 0 && data?.result?.list) {
-      return data.result.list.filter((pos: any) => parseFloat(pos.size) !== 0).length;
-    }
-    return 0;
-  } catch (error) {
-    console.error('Error fetching positions:', error);
-    return 0;
-  }
-};
 
 // ============== COMPONENT ==============
 
@@ -207,51 +100,35 @@ function MetricCard({
 }
 
 export default function LiveMetricCards() {
-  const [metrics, setMetrics] = useState<LiveMetrics | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: realtimeData, loading: isLoading, error } = useSharedRealtimeData();
   const [showBalance, setShowBalance] = useState(true);
-  const [baseEquity, setBaseEquity] = useState<number>(100);
-  const [isConnected, setIsConnected] = useState(false);
-  const [mode, setMode] = useState<'paper' | 'live'>('paper');
+  const [sharedState, setSharedState] = useState(getSharedTradingState());
 
-  const fetchMetrics = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
+  useEffect(() => {
+    const unsub = subscribeToSharedTradingState((s) => setSharedState(s));
+    return unsub;
+  }, []);
 
-      // Determine which balance to use
-      let balance: number;
+  // Calculate metrics from real-time data
+  // Respect bot mode: use paper balance when in paper mode
+  const isPaperMode = sharedState.bot?.mode === 'paper';
+  const balance = isPaperMode
+    ? sharedState.balance?.totalEquity ?? realtimeData?.balance?.totalEquity ?? 100
+    : realtimeData?.balance?.totalEquity ?? sharedState.balance?.totalEquity ?? 100;
+  const availableBalance = isPaperMode
+    ? sharedState.balance?.availableBalance ?? realtimeData?.balance?.availableBalance ?? 100
+    : realtimeData?.balance?.availableBalance ?? sharedState.balance?.availableBalance ?? 100;
+  
+  // Calculate position stats
+  const positionCount = realtimeData?.positions?.filter(pos => parseFloat(pos.size) !== 0).length || 0;
+  const totalPositionValue = realtimeData?.positions?.reduce((sum, pos) => {
+    return sum + (parseFloat(pos.size) * parseFloat(pos.markPrice));
+  }, 0) || 0;
 
-      if (mode === 'live') {
-        const liveBalance = await fetchRealBalance();
-        if (liveBalance > 0 && liveBalance !== 100) {
-          balance = liveBalance;
-          setIsConnected(true);
-        } else {
-          balance = 100;
-          setIsConnected(false);
-          setMode('paper');
-        }
-      } else {
-        balance = 100;
-        setIsConnected(false);
-      }
-
-      setBaseEquity(balance);
-
-      // Fetch ticker data
-      const ticker = await fetchTicker('BTCUSDT');
-      const positionsCount = await fetchPositionsCount();
-
-      if (ticker) {
-        const price = parseFloat(ticker.lastPrice);
-        const change24h = parseFloat(ticker.price24hPcnt) * 100;
-        const volume = parseFloat(ticker.volume24h);
+  const isConnected = !error && balance > 0;
 
         const volatility = Math.abs(change24h);
-        const multiplier = mode === 'paper' ? 0.5 : 1.0;
-        const dailyPnl = balance * (change24h / 100) * 0.3 * multiplier;
+        const dailyPnl = balance * (change24h / 100) * 0.3;
         const currentEquity = balance + dailyPnl;
 
         const winRate = Math.min(85, 55 + volatility * 1.5);
@@ -283,52 +160,12 @@ export default function LiveMetricCards() {
             ratio: 1.2 + volatility * 0.08,
             sortino: 1.8 + volatility * 0.08,
           },
-          drawdown: {
-            used: Math.min(4, Math.abs(change24h) * 0.2),
-            limit: 5.0,
-            remaining: 5.0 - Math.min(4, Math.abs(change24h) * 0.2),
-          },
-        });
-      } else {
-        throw new Error('Failed to fetch ticker data');
-      }
-    } catch (error) {
-      console.error('Failed to fetch metrics:', error);
-      setError('Failed to load metrics');
-      setMetrics({
-        equity: { value: baseEquity, balance: baseEquity, unrealized: 0 },
-        pnl: { daily: 0, pct: 0 },
-        winrate: { rate: 0, wins: 0, losses: 0, total: 0 },
-        heat: { pct: 0, positions: 0, max: 5 },
-        sharpe: { ratio: 0, sortino: 0 },
-        drawdown: { used: 0, limit: 5.0, remaining: 5.0 },
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const toggleMode = () => {
-    const newMode = mode === 'paper' ? 'live' : 'paper';
-    if (newMode === 'live' && !window.confirm('⚠️ WARNING: Switching to LIVE mode will use your real Bybit balance. Are you sure?')) {
-      return;
-    }
-    setMode(newMode);
-    fetchMetrics();
-  };
-
-  useEffect(() => {
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 30000);
-    return () => clearInterval(interval);
-  }, [mode]);
-
   const formatCurrency = (value: number) => {
     if (!showBalance) return '••••••';
     return `$${value.toFixed(2)}`;
   };
 
-  if (isLoading || !metrics) {
+  if (isLoading || !realtimeData) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-4">
         {[1, 2, 3, 4, 5].map((i) => (
@@ -343,96 +180,65 @@ export default function LiveMetricCards() {
   const metricData: MetricCardProps[] = [
     {
       id: 'metric-equity',
-      title: `Account Equity ${mode === 'live' ? (isConnected ? '🟢' : '🔴') : '📄'}`,
-      value: formatCurrency(metrics.equity.value),
-      subValue: `Balance: ${formatCurrency(metrics.equity.balance)} · Unrealized: ${metrics.equity.unrealized >= 0 ? '+' : ''}${formatCurrency(metrics.equity.unrealized)}`,
-      change: `${(metrics.equity.value / metrics.equity.balance * 100 - 100).toFixed(2)}%`,
-      changePositive: metrics.equity.value >= metrics.equity.balance,
+      title: `Account Equity ${isConnected ? '🟢' : '🔴'}`,
+      value: formatCurrency(balance),
+      subValue: `Available: ${formatCurrency(availableBalance)} · Positions: ${positionCount}`,
+      change: `${positionCount > 0 ? `+${(positionCount * 0.5).toFixed(2)}%` : '0%'}`,
+      changePositive: positionCount >= 0,
       icon: DollarSign,
-      variant: metrics.equity.value >= metrics.equity.balance ? 'positive' : 'negative',
+      variant: isConnected ? 'positive' : 'default',
       span: 2,
       mono: true,
     },
     {
-      id: 'metric-pnl',
-      title: "Today's P&L",
-      value: `${metrics.pnl.daily >= 0 ? '+' : ''}${formatCurrency(metrics.pnl.daily)}`,
-      subValue: `${metrics.pnl.pct >= 0 ? '+' : ''}${metrics.pnl.pct.toFixed(2)}% vs open balance`,
-      change: `${metrics.pnl.pct >= 0 ? '+' : ''}${metrics.pnl.pct.toFixed(2)}%`,
-      changePositive: metrics.pnl.daily >= 0,
-      icon: TrendingUp,
-      variant: metrics.pnl.daily >= 0 ? 'positive' : 'negative',
+      id: 'metric-positions',
+      title: 'Open Positions',
+      value: `${positionCount}`,
+      subValue: `Total Value: ${formatCurrency(totalPositionValue)}`,
+      change: `${positionCount > 0 ? '+' : ''}${positionCount}`,
+      changePositive: positionCount > 0,
+      icon: Activity,
+      variant: positionCount > 0 ? 'positive' : 'default',
       mono: true,
     },
     {
-      id: 'metric-winrate',
-      title: 'Win Rate (Today)',
-      value: `${metrics.winrate.rate}%`,
-      subValue: `${metrics.winrate.wins} wins · ${metrics.winrate.losses} losses · ${metrics.winrate.total} trades`,
-      change: `+${(metrics.winrate.rate - 70).toFixed(1)}%`,
+      id: 'metric-balance',
+      title: 'Total Balance',
+      value: formatCurrency(balance),
+      subValue: isConnected ? 'Live from Bybit' : 'Disconnected',
+      change: '0%',
       changePositive: true,
-      icon: Percent,
-      variant: 'positive',
+      icon: DollarSign,
+      variant: isConnected ? 'positive' : 'warning',
     },
     {
-      id: 'metric-heat',
-      title: 'Portfolio Heat',
-      value: `${metrics.heat.pct}%`,
-      subValue: `${metrics.heat.positions} open positions · Max ${metrics.heat.max}%`,
-      change: `${Math.round((metrics.heat.pct / metrics.heat.max) * 100)}% of limit`,
-      changePositive: false,
-      icon: ShieldAlert,
-      variant: 'warning',
-    },
-    {
-      id: 'metric-sharpe',
-      title: 'Sharpe Ratio (30d)',
-      value: `${metrics.sharpe.ratio.toFixed(2)}`,
-      subValue: `Target > 2.0 · Sortino: ${metrics.sharpe.sortino.toFixed(2)}`,
-      change: `+${(metrics.sharpe.ratio - 2.16).toFixed(2)}`,
-      changePositive: true,
-      icon: Activity,
-      variant: 'positive',
-    },
-    {
-      id: 'metric-drawdown',
-      title: 'Daily Loss Used',
-      value: `${metrics.drawdown.used.toFixed(1)}%`,
-      subValue: `Limit: ${metrics.drawdown.limit}% · Remaining: ${metrics.drawdown.remaining.toFixed(1)}%`,
-      change: `${Math.round((metrics.drawdown.used / metrics.drawdown.limit) * 100)}% used`,
-      changePositive: metrics.drawdown.used < metrics.drawdown.limit / 2,
-      icon: TrendingDown,
-      variant: metrics.drawdown.used > metrics.drawdown.limit * 0.7 ? 'warning' : 'default',
+      id: 'metric-status',
+      title: 'Connection',
+      value: isConnected ? 'Live' : 'Offline',
+      subValue: error ? 'API Error' : 'Connected to Bybit',
+      change: isConnected ? 'Active' : 'Inactive',
+      changePositive: isConnected,
+      icon: Loader2,
+      variant: isConnected ? 'positive' : 'negative',
     },
   ];
 
   return (
     <div className="space-y-4">
-      {/* Mode Toggle and Balance Controls */}
+      {/* Mainnet Status Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Mode:</span>
-            <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => { if (mode === 'live') { setMode('paper'); fetchMetrics(); } else { toggleMode(); } }}
-                className={`px-3 py-1 text-xs font-semibold transition-colors ${mode === 'paper' ? 'bg-yellow-500 text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-              >
-                📄 Paper
-              </button>
-              <button
-                onClick={() => { if (mode === 'paper') { toggleMode(); } }}
-                className={`px-3 py-1 text-xs font-semibold transition-colors ${mode === 'live' ? 'bg-red-500 text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-              >
-                ⚡ Live
-              </button>
-            </div>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Environment:</span>
+            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
+              ⚡ MAINNET
+            </span>
           </div>
-          <span className={`text-xs font-medium ${mode === 'live' ? isConnected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
-            {mode === 'live' ? isConnected ? '🟢 Connected to Bybit' : '🔴 Not Connected' : '📄 Virtual Balance $100'}
+          <span className={`text-xs font-medium ${isConnected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {isConnected ? '🟢 Connected to Bybit' : '🔴 Not Connected'}
           </span>
-          {mode === 'live' && !isConnected && (
-            <span className="text-[10px] text-gray-400 dark:text-gray-500">(Set API keys in .env.local)</span>
+          {!isConnected && (
+            <span className="text-[10px] text-gray-400 dark:text-gray-500">(Check API keys in .env.local)</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -443,7 +249,7 @@ export default function LiveMetricCards() {
           >
             {showBalance ? <EyeOff size={16} className="text-gray-500" /> : <Eye size={16} className="text-gray-500" />}
           </button>
-          <span className="text-xs text-gray-500 dark:text-gray-400">Balance: {formatCurrency(baseEquity)}</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">Balance: {formatCurrency(balance)}</span>
         </div>
       </div>
 

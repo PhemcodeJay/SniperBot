@@ -64,33 +64,16 @@ const STATUS_CONFIG: Record<HealthStatus, { icon: React.ElementType; color: stri
   checking: { icon: RefreshCw, color: 'text-muted-foreground', bg: 'bg-muted border-border', label: 'Checking' },
 };
 
+import { realtimeManager } from '@/lib/realtimeManager';
+
 async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: HealthStatus; latency: number }> {
   const start = Date.now();
   
   try {
     if (endpoint.url.startsWith('wss://')) {
-      return new Promise((resolve) => {
-        const ws = new WebSocket(endpoint.url);
-        const timeout = setTimeout(() => {
-          ws.close();
-          resolve({ status: 'offline', latency: Date.now() - start });
-        }, 5000);
-
-        ws.onopen = () => {
-          clearTimeout(timeout);
-          const latency = Date.now() - start;
-          ws.close();
-          resolve({ 
-            status: latency < 500 ? 'online' : 'degraded', 
-            latency 
-          });
-        };
-
-        ws.onerror = () => {
-          clearTimeout(timeout);
-          resolve({ status: 'offline', latency: Date.now() - start });
-        };
-      });
+      const connected = realtimeManager.isWsConnected();
+      const latency = Date.now() - start;
+      return { status: connected ? 'online' : 'offline', latency };
     } else {
       const response = await fetch(endpoint.url, {
         method: 'GET',

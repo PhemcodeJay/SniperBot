@@ -4,6 +4,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import { setSharedBotState } from '@/lib/tradingState';
 import { 
   Settings, ExternalLink, Save, Key, Shield, 
   Wifi, WifiOff, RefreshCw, CheckCircle, XCircle,
@@ -17,25 +19,8 @@ interface ApiCredentials {
   isTestnet: boolean;
 }
 
-// ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
-
 // ============== API HELPERS ==============
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const getApiCredentials = () => getBybitCredentials();
 
 // ============== COMPONENT ==============
 
@@ -88,22 +73,16 @@ export default function SettingsPage() {
     setError(null);
     setAccountType('Checking...');
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
 
     try {
-      const signature = generateSignature(credentials.apiSecret, timestamp, recvWindow, params);
+      const headers = await createBybitAuthHeaders(credentials.apiKey, credentials.apiSecret, params, recvWindow);
       
       // Get wallet balance
       const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
         method: 'GET',
-        headers: {
-          'X-BAPI-API-KEY': credentials.apiKey,
-          'X-BAPI-TIMESTAMP': timestamp,
-          'X-BAPI-SIGN': signature,
-          'X-BAPI-RECV-WINDOW': recvWindow,
-        },
+        headers,
       });
 
       const data = await safeJsonParse(response);
@@ -121,12 +100,7 @@ export default function SettingsPage() {
         try {
           const accountInfoResponse = await fetch(`${BYBIT_BASE_URL}/v5/account/info`, {
             method: 'GET',
-            headers: {
-              'X-BAPI-API-KEY': credentials.apiKey,
-              'X-BAPI-TIMESTAMP': timestamp,
-              'X-BAPI-SIGN': signature,
-              'X-BAPI-RECV-WINDOW': recvWindow,
-            },
+            headers,
           });
           const accountData = await safeJsonParse(accountInfoResponse);
           
@@ -198,6 +172,7 @@ export default function SettingsPage() {
       }));
       
       // Dispatch event to notify other components
+      setSharedBotState({ isConnected: true, status: 'scanning', lastAction: 'Credentials saved' });
       window.dispatchEvent(new CustomEvent('bybit-credentials-saved', {
         detail: {
           apiKey: credentials.apiKey,

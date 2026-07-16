@@ -3,6 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { realtimeManager } from '@/lib/realtimeManager';
 import { Radio, ToggleLeft, ToggleRight, Wifi, RefreshCw, AlertCircle, Key } from 'lucide-react';
 
 interface WsChannel {
@@ -52,193 +53,9 @@ const generateWsSignature = (apiSecret: string, timestamp: string, recvWindow: s
   return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
 };
 
-class WSConnection {
-  private ws: WebSocket | null = null;
-  private url: string;
-  private reconnectDelay: number;
-  private pingInterval: number;
-  private isConnected = false;
-  private isAuthenticated = false;
-  private reconnectTimeout: NodeJS.Timeout | null = null;
-  private pingTimeout: NodeJS.Timeout | null = null;
-  private onMessageCallback: ((data: any) => void) | null = null;
-  private onStatusCallback: ((status: 'connected' | 'disconnected' | 'reconnecting' | 'error' | 'authenticated') => void) | null = null;
-  private privateTopics: string[] = [];
-  private publicTopics: string[] = [];
-  private apiKey: string = '';
-  private apiSecret: string = '';
-
-  constructor(url: string, reconnectDelay: number, pingInterval: number) {
-    this.url = url;
-    this.reconnectDelay = reconnectDelay;
-    this.pingInterval = pingInterval;
-  }
-
-  setCredentials(apiKey: string, apiSecret: string) {
-    this.apiKey = apiKey;
-    this.apiSecret = apiSecret;
-  }
-
-  connect(topics: string[] = []) {
-    this.publicTopics = topics.filter(t => 
-      ['kline', 'orderbook', 'publicTrade', 'tickers', 'allLiquidation'].some(prefix => t.includes(prefix) || t === prefix)
-    );
-    this.privateTopics = topics.filter(t => 
-      ['position', 'execution', 'order', 'wallet', 'stopOrder'].includes(t)
-    );
-
-    try {
-      this.ws = new WebSocket(this.url);
-      this.setupEventHandlers();
-    } catch (error) {
-      console.error('WebSocket connection error:', error);
-      this.handleReconnect();
-    }
-  }
-
-  private setupEventHandlers() {
-    if (!this.ws) return;
-
-    this.ws.onopen = () => {
-      this.isConnected = true;
-      this.onStatusCallback?.('connected');
-      console.log('WebSocket connected');
-      
-      if (this.publicTopics.length > 0) {
-        this.subscribe(this.publicTopics);
-      }
-
-      if (this.privateTopics.length > 0 && this.apiKey && this.apiSecret) {
-        this.authenticate();
-      } else if (this.privateTopics.length > 0) {
-        console.warn('Private topics require API credentials.');
-      }
-
-      this.startPingInterval();
-    };
-
-    this.ws.onclose = () => {
-      this.isConnected = false;
-      this.isAuthenticated = false;
-      this.onStatusCallback?.('disconnected');
-      this.clearPingInterval();
-      this.handleReconnect();
-      console.log('WebSocket disconnected');
-    };
-
-    this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      this.onStatusCallback?.('error');
-    };
-
-    this.ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        if (data.op === 'auth' && data.retCode === 0) {
-          this.isAuthenticated = true;
-          this.onStatusCallback?.('authenticated');
-          console.log('WebSocket authenticated');
-          
-          if (this.privateTopics.length > 0) {
-            this.subscribe(this.privateTopics);
-          }
-        }
-        
-        this.onMessageCallback?.(data);
-      } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
-      }
-    };
-  }
-
-  private authenticate() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-
-    const expires = Date.now() + 10000;
-    const timestamp = expires.toString();
-    const recvWindow = '5000';
-    const signature = generateWsSignature(this.apiSecret, timestamp, recvWindow);
-
-    const authMessage = {
-      op: 'auth',
-      args: [this.apiKey, expires, signature, recvWindow],
-    };
-
-    this.ws.send(JSON.stringify(authMessage));
-    console.log('Authentication request sent');
-  }
-
-  private handleReconnect() {
-    if (this.reconnectTimeout) return;
-    
-    this.reconnectTimeout = setTimeout(() => {
-      this.reconnectTimeout = null;
-      this.onStatusCallback?.('reconnecting');
-      const allTopics = [...this.publicTopics, ...this.privateTopics];
-      this.connect(allTopics);
-    }, this.reconnectDelay);
-  }
-
-  private startPingInterval() {
-    this.clearPingInterval();
-    this.pingTimeout = setInterval(() => {
-      if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ op: 'ping' }));
-      }
-    }, this.pingInterval);
-  }
-
-  private clearPingInterval() {
-    if (this.pingTimeout) {
-      clearInterval(this.pingTimeout);
-      this.pingTimeout = null;
-    }
-  }
-
-  subscribe(topics: string[]) {
-    if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
-      const message = {
-        op: 'subscribe',
-        args: topics,
-      };
-      this.ws.send(JSON.stringify(message));
-      console.log(`Subscribed to: ${topics.join(', ')}`);
-    }
-  }
-
-  unsubscribe(topics: string[]) {
-    if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
-      const message = {
-        op: 'unsubscribe',
-        args: topics,
-      };
-      this.ws.send(JSON.stringify(message));
-    }
-  }
-
-  onMessage(callback: (data: any) => void) {
-    this.onMessageCallback = callback;
-  }
-
-  onStatus(callback: (status: 'connected' | 'disconnected' | 'reconnecting' | 'error' | 'authenticated') => void) {
-    this.onStatusCallback = callback;
-  }
-
-  disconnect() {
-    this.clearPingInterval();
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
-    }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    this.isConnected = false;
-    this.isAuthenticated = false;
-  }
-}
+// Note: Per-component WebSocket connections were removed in favor of the centralized
+// `realtimeManager`. The previous `WSConnection` helper was intentionally removed
+// to avoid creating multiple WebSocket connections from the UI.
 
 export default function WebSocketConfigPanel() {
   const [channels, setChannels] = useState<WsChannel[]>([...PUBLIC_CHANNELS, ...PRIVATE_CHANNELS]);
@@ -252,7 +69,7 @@ export default function WebSocketConfigPanel() {
   const [apiKey, setApiKey] = useState<string>('');
   const [apiSecret, setApiSecret] = useState<string>('');
   
-  const wsConnectionRef = useRef<WSConnection | null>(null);
+  const unsubscribeRef = useRef<() => void | null>(null);
 
   const parseTimeToMs = (time: string): number => {
     const value = parseInt(time);
@@ -266,49 +83,38 @@ export default function WebSocketConfigPanel() {
   };
 
   const connectWebSocket = () => {
-    const wsUrl = getWsUrl();
-    const reconnectMs = parseTimeToMs(reconnectDelay);
-    const pingMs = parseTimeToMs(pingInterval);
-    
-    if (wsConnectionRef.current) {
-      wsConnectionRef.current.disconnect();
+    // Use singleton realtimeManager for testing subscriptions instead
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+      setConnectionStatus('idle');
+      return;
     }
-    
-    const connection = new WSConnection(wsUrl, reconnectMs, pingMs);
-    wsConnectionRef.current = connection;
 
-    if (useAuth && apiKey && apiSecret) {
-      connection.setCredentials(apiKey, apiSecret);
-    }
-    
-    connection.onStatus((status) => {
-      setConnectionStatus(status);
-    });
-    
-    connection.onMessage((data) => {
+    setConnectionStatus('connecting');
+    setReceivedMessages(0);
+    let localCount = 0;
+    unsubscribeRef.current = realtimeManager.subscribeTicks((data: any) => {
+      localCount++;
       setReceivedMessages(prev => prev + 1);
-      
-      if (data.op === 'auth') {
-        if (data.retCode === 0) {
-          console.log('Authentication successful');
-        } else {
-          console.error('Authentication failed:', data.retMsg);
-        }
-      }
-      
-      if (data.topic) {
-        console.log(`Received ${data.topic} data`);
-      }
+      setConnectionStatus('connected');
+      addLog('📩 Received tick data');
     });
-    
-    const activeTopics = channels.filter(c => c.enabled).map(c => c.topic);
-    connection.connect(activeTopics);
+
+    // If no messages after a short window, mark as error/idle
+    setTimeout(() => {
+      if (localCount === 0) {
+        setConnectionStatus('error');
+        addLog('⚠️ No messages received during test window');
+        if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null; }
+      }
+    }, 3000);
   };
 
   const disconnectWebSocket = () => {
-    if (wsConnectionRef.current) {
-      wsConnectionRef.current.disconnect();
-      wsConnectionRef.current = null;
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
     }
     setConnectionStatus('disconnected');
   };
@@ -332,11 +138,6 @@ export default function WebSocketConfigPanel() {
   const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
-    
-    if (wsConnectionRef.current && (connectionStatus === 'connected' || connectionStatus === 'authenticated')) {
-      const activeTopics = channels.filter(c => c.enabled).map(c => c.topic);
-      wsConnectionRef.current.subscribe(activeTopics);
-    }
   };
 
   const enabledCount = channels.filter((c) => c.enabled).length;
@@ -344,8 +145,9 @@ export default function WebSocketConfigPanel() {
 
   useEffect(() => {
     return () => {
-      if (wsConnectionRef.current) {
-        wsConnectionRef.current.disconnect();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
   }, []);

@@ -4,7 +4,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import { appendSharedAlert, subscribeToSharedTradingState } from '@/lib/tradingState';
 import { Bell, Check, X, Filter, Trash2, Settings, RefreshCw, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { realtimeManager } from '@/lib/realtimeManager';
 
 interface Alert {
   id: string;
@@ -32,34 +35,12 @@ interface NotificationSettings {
 }
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
 
 // ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const getApiCredentials = () => getBybitCredentials();
 
 // ============== API FUNCTIONS ==============
 
@@ -95,19 +76,13 @@ const fetchPositions = async (): Promise<any[]> => {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return [];
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -151,6 +126,13 @@ export default function AlertsPage() {
   const hasValidCredentials = useCallback(() => {
     const { apiKey, apiSecret } = getApiCredentials();
     return !!(apiKey && apiSecret);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSharedTradingState((state) => {
+      setAlerts(state.alerts);
+    });
+    return unsubscribe;
   }, []);
 
   // Generate alert from market data
@@ -268,6 +250,7 @@ export default function AlertsPage() {
         const alert = generateAlertFromMarketData(symbol, ticker);
         if (alert) {
           newAlerts.push(alert);
+        appendSharedAlert(alert);
         }
       });
 
@@ -319,88 +302,23 @@ export default function AlertsPage() {
     }
   }, [hasValidCredentials, notifSettings]);
 
-  // Connect WebSocket
-  const connectWebSocket = useCallback(() => {
-    try {
-      setConnectionStatus('connecting');
-      
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-        
-        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ op: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            const ticker = data.data;
-            if (ticker && ticker.symbol) {
-              setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
-              const alert = generateAlertFromMarketData(ticker.symbol, ticker);
-              if (alert) {
-                setAlerts(prev => [alert, ...prev].slice(0, 50));
-                setLastAlertTime(Date.now());
-              }
-            }
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setConnectionStatus('error');
-      };
-
-      ws.onclose = () => {
-        setConnectionStatus('disconnected');
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      setConnectionStatus('error');
-    }
-  }, []);
-
-  const disconnectWebSocket = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  }, []);
+  const disconnectWebSocket = useCallback(() => { /* noop - singleton handles ws */ }, []);
 
   // Initialize
   useEffect(() => {
     fetchAlerts();
-    connectWebSocket();
+    const unsubscribe = realtimeManager.subscribeTicks((ticker: any) => {
+      try {
+        if (ticker && ticker.symbol) {
+          setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
+          const alert = generateAlertFromMarketData(ticker.symbol, ticker);
+          if (alert) {
+            setAlerts(prev => [alert, ...prev].slice(0, 50));
+            setLastAlertTime(Date.now());
+          }
+        }
+      } catch (e) { /* ignore */ }
+    });
 
     const interval = setInterval(() => {
       if (connectionStatus === 'disconnected') {
@@ -410,13 +328,9 @@ export default function AlertsPage() {
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
-      if (heartbeatIntervalRef.current) {
-        clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = null;
-      }
+      unsubscribe();
     };
-  }, [fetchAlerts, connectWebSocket, disconnectWebSocket]);
+  }, [fetchAlerts]);
 
   // Save settings to localStorage
   useEffect(() => {

@@ -3,6 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { realtimeManager } from '@/lib/realtimeManager';
 import AppLayout from '@/components/AppLayout';
 import { 
   Settings, ExternalLink, Save, Key, Shield, 
@@ -10,6 +11,8 @@ import {
   AlertCircle, Eye, EyeOff, Copy, Check,
   Network, Database, Activity, Server, Loader2
 } from 'lucide-react';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import { setSharedBalance } from '@/lib/tradingState';
 
 // ============== TYPES ==============
 interface ApiCredentials {
@@ -51,32 +54,10 @@ interface ConnectionHealth {
 }
 
 // ============== BYBIT API CONSTANTS ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 // ============== UTILITY FUNCTIONS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const getApiCredentials = () => getBybitCredentials();
 
 const formatTime = (seconds: number): string => {
   const h = Math.floor(seconds / 3600);
@@ -90,29 +71,26 @@ const formatTime = (seconds: number): string => {
 // Fetch wallet balance
 const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ totalEquity: string; availableBalance: string; uid: string }> => {
   try {
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const params = 'accountType=UNIFIED';
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance?${params}`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
-    
     if (data?.retCode === 0 && data?.result) {
-      const wallet = data.result.list?.[0];
+      const wallet = data.result.list?.[0] || data.result;
+      const totalEquity = wallet?.totalEquity || wallet?.equity || wallet?.walletBalance || '0';
+      const availableBalance = wallet?.availableBalance || wallet?.available || wallet?.walletBalance || '0';
+      const uid = data.result.uid || data.result.accountUid || wallet?.uid || wallet?.accountUid || 'N/A';
+
       return {
-        totalEquity: wallet?.totalEquity || wallet?.equity || '0',
-        availableBalance: wallet?.availableBalance || wallet?.available || '0',
-        uid: data.result.uid || data.result.accountUid || 'N/A',
+        totalEquity: String(totalEquity),
+        availableBalance: String(availableBalance),
+        uid,
       };
     }
     return { totalEquity: '0', availableBalance: '0', uid: 'N/A' };
@@ -125,19 +103,13 @@ const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ 
 // Fetch account info
 const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ accountType: string; uid: string }> => {
   try {
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/account/info`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -672,88 +644,37 @@ const WebSocketConfigPanel = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const unsubscribeRef = useRef<() => void | null>(null);
 
   const addLog = (message: string) => {
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-20));
   };
 
   const connect = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      disconnect();
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+      setStatus('idle');
       return;
     }
 
     setStatus('connecting');
-    setReconnectAttempts(0);
-    addLog('Connecting to WebSocket...');
+    setMessageCount(0);
+    let localCount = 0;
+    unsubscribeRef.current = realtimeManager.subscribeTicks((data: any) => {
+      localCount++;
+      setMessageCount(prev => prev + 1);
+      setStatus('connected');
+      addLog('📩 Received tick data');
+    });
 
-    try {
-      const ws = new WebSocket(config.url);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setStatus('connected');
-        setMessageCount(0);
-        setReconnectAttempts(0);
-        addLog('✅ Connected successfully');
-        
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: ['tickers.BTCUSDT', 'tickers.ETHUSDT', 'tickers.SOLUSDT']
-        }));
-        addLog('📡 Subscribed to ticker updates');
-
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-        }
-        heartbeatIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ op: 'ping' }));
-          }
-        }, config.heartbeatInterval);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          setMessageCount(prev => prev + 1);
-          
-          if (data.topic) {
-            addLog(`📩 Received ${data.topic} data`);
-          } else if (data.op === 'pong') {
-            // Heartbeat response
-          }
-        } catch (e) {
-          // Ignore parse errors for binary data
-        }
-      };
-
-      ws.onerror = () => {
-        console.warn('WebSocket error');
-        addLog('⚠️ WebSocket error occurred');
-      };
-
-      ws.onclose = (event) => {
-        setStatus('idle');
-        addLog('🔌 Disconnected');
-        
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        
-        if (event.code !== 1000) {
-          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 30000);
-          reconnectTimeoutRef.current = setTimeout(() => {
-            setReconnectAttempts(prev => prev + 1);
-            addLog(`🔄 Reconnecting... (attempt ${reconnectAttempts + 1})`);
-            connect();
-          }, delay);
-        }
-      };
-    } catch (error) {
-      setStatus('error');
-      addLog('❌ Connection failed');
-    }
+    setTimeout(() => {
+      if (localCount === 0) {
+        setStatus('error');
+        addLog('⚠️ No messages received during test window');
+        if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null; }
+      }
+    }, 3000);
   };
 
   const disconnect = () => {
@@ -765,9 +686,9 @@ const WebSocketConfigPanel = () => {
       clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = null;
     }
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Normal closure');
-      wsRef.current = null;
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
     }
     setStatus('idle');
     setReconnectAttempts(0);

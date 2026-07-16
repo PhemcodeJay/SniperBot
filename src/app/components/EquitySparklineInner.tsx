@@ -12,9 +12,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
   ReferenceLine,
-  Loader2,
-  AlertCircle,
 } from 'recharts';
+import { Loader2, AlertCircle } from 'lucide-react';
+import { realtimeManager } from '@/lib/realtimeManager';
 
 interface EquityPoint {
   date: string;
@@ -271,96 +271,29 @@ export default function EquityCurveChartInner() {
     }
   };
 
-  // Connect WebSocket
-  const connectWebSocket = () => {
-    try {
-      setConnectionStatus('connecting');
+  // Subscribe to singleton ticks instead of creating a dedicated WebSocket
 
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        setConnectionStatus('connected');
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: ['tickers.BTCUSDT']
-        }));
-        startHeartbeat();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            fetchData();
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setConnectionStatus('disconnected');
-      };
-
-      ws.onclose = () => {
-        setConnectionStatus('disconnected');
-        stopHeartbeat();
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      console.error('Failed to connect WebSocket:', err);
-      setConnectionStatus('disconnected');
-    }
-  };
-
-  const startHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-    }
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ op: 'ping' }));
-      }
-    }, 30000);
-  };
-
-  const stopHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  };
-
-  const disconnectWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Normal closure');
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    stopHeartbeat();
-  };
+  const disconnectWebSocket = () => { /* noop - handled by realtimeManager */ };
 
   useEffect(() => {
     fetchData();
-    connectWebSocket();
+
+    const unsubscribe = realtimeManager.subscribeTicks((ticker: any) => {
+      try {
+        // Only refresh when BTC tick arrives
+        if (ticker?.symbol === 'BTCUSDT') fetchData();
+      } catch (e) {
+        // ignore
+      }
+    });
 
     const interval = setInterval(() => {
-      if (connectionStatus === 'disconnected') {
-        fetchData();
-      }
+      if (connectionStatus === 'disconnected') fetchData();
     }, 60000);
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
+      unsubscribe();
     };
   }, []);
 

@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Zap, TrendingUp, TrendingDown, Filter, Clock, Loader2, RefreshCw } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
+import { realtimeManager } from '@/lib/realtimeManager';
 
 interface Signal {
   id: string;
@@ -191,110 +192,36 @@ export default function SignalFeed() {
     }
   };
 
-  // Connect WebSocket for real-time updates
-  const connectWebSocket = () => {
-    try {
-      setConnectionStatus('connecting');
+  // Subscribe to singleton ticks rather than opening a dedicated WebSocket
 
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('SignalFeed WebSocket connected');
-        setConnectionStatus('connected');
-        setError(null);
-
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-
-        startHeartbeat();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            const ticker = data.data;
-            if (ticker && ticker.symbol) {
-              const signal = generateSignalFromData(ticker.symbol, ticker);
-              if (signal) {
-                setSignals(prev => {
-                  const filtered = prev.filter(s => s.symbol !== ticker.symbol || s.status === 'executed');
-                  return [signal, ...filtered].slice(0, 50);
-                });
-              }
-            }
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        console.warn('SignalFeed WebSocket error');
-        setConnectionStatus('disconnected');
-      };
-
-      ws.onclose = () => {
-        console.log('SignalFeed WebSocket disconnected');
-        setConnectionStatus('disconnected');
-        stopHeartbeat();
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      console.error('Failed to connect SignalFeed WebSocket:', err);
-      setConnectionStatus('disconnected');
-    }
-  };
-
-  const startHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-    }
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ op: 'ping' }));
-      }
-    }, 30000);
-  };
-
-  const stopHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  };
-
-  const disconnectWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Normal closure');
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    stopHeartbeat();
-  };
+  const disconnectWebSocket = () => { /* noop - singleton manages WS */ };
 
   useEffect(() => {
     fetchSignals();
-    connectWebSocket();
+
+    const unsubscribe = realtimeManager.subscribeTicks((ticker: any) => {
+      try {
+        if (ticker && ticker.symbol) {
+          const signal = generateSignalFromData(ticker.symbol, ticker);
+          if (signal) {
+            setSignals(prev => {
+              const filtered = prev.filter(s => s.symbol !== ticker.symbol || s.status === 'executed');
+              return [signal, ...filtered].slice(0, 50);
+            });
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
 
     const interval = setInterval(() => {
-      if (connectionStatus === 'disconnected') {
-        fetchSignals();
-      }
+      if (connectionStatus === 'disconnected') fetchSignals();
     }, 60000);
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
+      unsubscribe();
     };
   }, []);
 

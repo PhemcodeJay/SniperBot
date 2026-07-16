@@ -4,6 +4,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
+import { realtimeManager } from '@/lib/realtimeManager';
+import { BYBIT_BASE_URL, fetchBybitWalletBalance, getBybitCredentials, normalizeBybitQty, placeBybitOrder, safeJsonParse } from '@/lib/bybit';
+import { appendSharedAlert, setSharedSignals, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
+import { readLiveTrades, writeLiveTrades } from '@/lib/liveTrades';
 import { 
   Zap, TrendingUp, TrendingDown, RefreshCw, ChevronDown, ChevronUp,
   AlertCircle, CheckCircle, Clock, Filter, Search, X,
@@ -45,7 +49,6 @@ interface Indicator {
 }
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = [
@@ -54,22 +57,28 @@ const SUPPORTED_SYMBOLS = [
   'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
 ];
 
+// Minimum time between WebSocket-triggered rescans. Ticker ticks can arrive
+// many times per second across 15 symbols; without a throttle every tick
+// would kick off a full market scan (15 ticker fetches + up to 15 kline
+// fetches), flooding Bybit's REST API and causing "Failed to fetch" errors.
+const MIN_RESCAN_INTERVAL_MS = 20000;
+
 // ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
+const getApiCredentials = () => getBybitCredentials();
+
+const readPaperTrades = (): any[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(window.localStorage.getItem('paper_trades') || '[]');
+  } catch {
+    return [];
+  }
 };
 
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+const writePaperTrades = (trades: any[]) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem('paper_trades', JSON.stringify(trades));
+  window.dispatchEvent(new CustomEvent('bybit-trades-updated'));
 };
 
 const formatPrice = (price: number): string => {
@@ -127,6 +136,10 @@ const fetchKline = async (symbol: string, interval: string = '15', limit: number
 // ============== COMPONENT ==============
 
 export default function SignalEnginePage() {
+  // Simple in-memory cache for wallet balance to avoid repeated POST /api/bybit
+  // calls during bursts of executions. Cached for 60 seconds.
+  const walletCacheRef = useRef<{ available: number; ts: number } | null>(null);
+
   const [signals, setSignals] = useState<Signal[]>([]);
   const [indicators] = useState<Indicator[]>([
     { id: 'rsi', label: 'RSI (14)', enabled: true, category: 'momentum' },
@@ -148,10 +161,26 @@ export default function SignalEnginePage() {
   const [stats, setStats] = useState({ live: 0, pending: 0, rejected: 0, avgConfidence: 0 });
   const [marketData, setMarketData] = useState<Record<string, any>>({});
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [executingSignalId, setExecutingSignalId] = useState<string | null>(null);
+  const [autoTradingEnabled, setAutoTradingEnabled] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSharedTradingState((state) => {
+      setSignals(state.signals);
+    });
+    return unsubscribe;
+  }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const autoExecutionRef = useRef<Set<string>>(new Set());
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Tracks the last time a market scan actually ran, so rapid-fire WS ticks
+  // can't each trigger their own full rescan.
+  const lastScanRef = useRef<number>(0);
+  // Guards against overlapping scans (a scan already in flight when another
+  // is requested).
+  const isScanningRef = useRef<boolean>(false);
 
   // Calculate technical indicators from kline data
   const calculateIndicators = (klines: any[]): { rsi: number; macd: { signal: 'bullish' | 'bearish' | 'neutral' }; bb: { position: string } } => {
@@ -269,8 +298,17 @@ export default function SignalEnginePage() {
     };
   };
 
-  // Fetch market data and generate signals
+  // Fetch market data and generate signals.
+  // NOTE: this intentionally has no dependency on `signals` state — it reads
+  // the latest signals via the functional form of setSignals instead. That
+  // keeps this callback's identity stable across renders, which in turn
+  // keeps the WebSocket connection (which depends on this function) from
+  // being torn down and reconnected on every signal update.
   const fetchMarketDataAndGenerateSignals = useCallback(async () => {
+    if (isScanningRef.current) return; // don't overlap scans
+    isScanningRef.current = true;
+    lastScanRef.current = Date.now();
+
     try {
       setIsLoading(true);
       setError(null);
@@ -278,25 +316,36 @@ export default function SignalEnginePage() {
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       setMarketData(tickers);
 
-      const newSignals: Signal[] = [];
+      // Fetch klines / build signals in parallel instead of a sequential
+      // for-await loop — sequential awaits inside the loop meant each
+      // symbol's kline request waited on the previous one, and any backlog
+      // from overlapping scans would compound into a large request queue
+      // that Bybit (or the browser) would start rejecting as network errors.
+      const signalResults = await Promise.all(
+        Object.entries(tickers).map(([symbol, ticker]) =>
+          generateSignalFromData(symbol, ticker).catch((err) => {
+            console.error(`Error generating signal for ${symbol}:`, err);
+            return null;
+          })
+        )
+      );
+      const newSignals = signalResults.filter((s): s is Signal => s !== null);
 
-      for (const [symbol, ticker] of Object.entries(tickers)) {
-        const signal = await generateSignalFromData(symbol, ticker);
-        if (signal) {
-          newSignals.push(signal);
-        }
-      }
+      setSignals(prevSignals => {
+        // Keep existing live/pending signals, add new ones
+        const existingActive = prevSignals.filter(s => s.status === 'live' || s.status === 'pending');
 
-      // Keep existing live/pending signals, add new ones
-      const existingActive = signals.filter(s => s.status === 'live' || s.status === 'pending');
-      
-      // Combine and deduplicate by symbol
-      const combined = [...newSignals, ...existingActive];
-      const uniqueSignals = Array.from(
-        new Map(combined.map(s => [s.symbol, s])).values()
-      ).sort((a, b) => b.confidence - a.confidence);
+        // Combine and deduplicate by symbol
+        const combined = [...newSignals, ...existingActive];
+        const uniqueSignals = Array.from(
+          new Map(combined.map(s => [s.symbol, s])).values()
+        ).sort((a, b) => b.confidence - a.confidence);
 
-      setSignals(uniqueSignals.slice(0, 50));
+        const merged = uniqueSignals.slice(0, 50);
+        setSharedSignals(merged as any);
+        return merged;
+      });
+
       setLastUpdate(new Date());
 
     } catch (err: any) {
@@ -304,105 +353,79 @@ export default function SignalEnginePage() {
       setError(err.message || 'Failed to fetch market data');
     } finally {
       setIsLoading(false);
-    }
-  }, [signals]);
-
-  // Connect WebSocket
-  const connectWebSocket = useCallback(() => {
-    try {
-      setConnectionStatus('connecting');
-      
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnectionStatus('connected');
-        setError(null);
-        
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-        
-        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ op: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            const ticker = data.data;
-            if (ticker && ticker.symbol) {
-              setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
-              // Refresh signals on price update
-              fetchMarketDataAndGenerateSignals();
-            }
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setConnectionStatus('error');
-      };
-
-      ws.onclose = () => {
-        setConnectionStatus('disconnected');
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      setConnectionStatus('error');
-    }
-  }, [fetchMarketDataAndGenerateSignals]);
-
-  const disconnectWebSocket = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
+      isScanningRef.current = false;
     }
   }, []);
 
-  // Initialize
+  // Connect WebSocket
+  // Use singleton realtime manager for ticks to avoid multiple WS connections
   useEffect(() => {
+    setConnectionStatus('connecting');
+    const unsubscribe = realtimeManager.subscribeTicks((tick: any) => {
+      try {
+        const ticker = tick;
+        if (ticker && ticker.symbol) {
+          setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
+          const now = Date.now();
+          if (now - lastScanRef.current >= MIN_RESCAN_INTERVAL_MS) {
+            fetchMarketDataAndGenerateSignals();
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+    // Mark connected once manager is running (manager logs/handles WS lifecycle)
+    setConnectionStatus('connected');
+    return () => { unsubscribe(); };
+  }, [fetchMarketDataAndGenerateSignals]);
+
+  const disconnectWebSocket = useCallback(() => {
+    // no-op: singleton manager controls lifecycle
+  }, []);
+
+  // Initialize — runs once on mount. connectionStatus is intentionally
+  // excluded from the dependency array: including it previously caused the
+  // WebSocket to be torn down and reconnected (and a fresh rescan interval
+  // spun up) on every connection status change, which combined with the
+  // per-tick rescans on message was a major contributor to request flooding.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedValue = window.localStorage.getItem('auto_trading_enabled');
+      if (storedValue !== null) {
+        setAutoTradingEnabled(storedValue === 'true');
+      }
+    }
+
+    const handleAutoTradingSettingChanged = (event: Event) => {
+      const customEvent = event as CustomEvent<{ enabled?: boolean }>;
+      if (typeof customEvent.detail?.enabled === 'boolean') {
+        setAutoTradingEnabled(customEvent.detail.enabled);
+      }
+    };
+
+    window.addEventListener('auto-trading-settings-changed', handleAutoTradingSettingChanged);
+
     fetchMarketDataAndGenerateSignals();
-    connectWebSocket();
+
+    const onBotStarted = () => {
+      // Immediately trigger a scan when the bot starts
+      fetchMarketDataAndGenerateSignals();
+    };
+    window.addEventListener('bot-started', onBotStarted);
 
     const interval = setInterval(() => {
-      if (connectionStatus === 'disconnected') {
-        fetchMarketDataAndGenerateSignals();
-      }
-    }, 120000); // Rescan every 2 minutes
+      // rely on singleton manager; still fallback to periodic rescan
+      fetchMarketDataAndGenerateSignals();
+    }, 120000);
 
     return () => {
       clearInterval(interval);
-      disconnectWebSocket();
-      if (heartbeatIntervalRef.current) {
-        clearInterval(heartbeatIntervalRef.current);
-        heartbeatIntervalRef.current = null;
-      }
+      window.removeEventListener('auto-trading-settings-changed', handleAutoTradingSettingChanged);
+      window.removeEventListener('bot-started', onBotStarted);
     };
-  }, [fetchMarketDataAndGenerateSignals, connectWebSocket, disconnectWebSocket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Update statistics
   useEffect(() => {
@@ -416,6 +439,39 @@ export default function SignalEnginePage() {
     setStats({ live, pending, rejected, avgConfidence: avgConf });
   }, [signals]);
 
+  useEffect(() => {
+    if (!autoTradingEnabled) return;
+    const highConfidenceSignals = signals.filter(
+      (signal) => signal.status === 'live' && signal.confidence >= 80 && !autoExecutionRef.current.has(signal.id)
+    );
+
+    if (highConfidenceSignals.length === 0) return;
+
+    // Limit concurrent live trades to a maximum (default 10)
+    const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '10', 10);
+    const currentLiveCount = readLiveTrades().filter(t => t.status === 'open').length;
+    const availableSlots = Math.max(0, MAX_CONCURRENT_LIVE - currentLiveCount);
+    if (availableSlots <= 0) return;
+
+    // Serialize executions to avoid a burst of simultaneous POST requests.
+    (async () => {
+      const toExecute = highConfidenceSignals.slice(0, availableSlots);
+      for (const signal of toExecute) {
+        autoExecutionRef.current.add(signal.id);
+        try {
+          // Await to serialize the requests
+          // eslint-disable-next-line no-await-in-loop
+          await handleExecuteSignal(signal, 'live');
+        } catch (e) {
+          // swallow here since handleExecuteSignal handles errors
+        } finally {
+          autoExecutionRef.current.delete(signal.id);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signals, autoTradingEnabled]);
+
   const handleRescan = async () => {
     setIsScanning(true);
     setError(null);
@@ -423,9 +479,9 @@ export default function SignalEnginePage() {
     try {
       await fetchMarketDataAndGenerateSignals();
       
-      if (connectionStatus === 'disconnected') {
-        disconnectWebSocket();
-        setTimeout(connectWebSocket, 1000);
+      if (connectionStatus === 'disconnected' || connectionStatus === 'error') {
+          // Trigger singleton manager refresh instead of per-component reconnect
+          realtimeManager.triggerRefresh();
       }
     } catch (err: any) {
       setError(err.message || 'Failed to scan market');
@@ -434,10 +490,151 @@ export default function SignalEnginePage() {
     }
   };
 
-  const handleExecuteSignal = (id: string) => {
-    setSignals(prev => prev.map(s => 
-      s.id === id ? { ...s, status: 'executed' } : s
-    ));
+  const handleExecuteSignal = async (signal: Signal, mode: 'paper' | 'live') => {
+    setExecutingSignalId(signal.id);
+    setError(null);
+
+    try {
+      if (mode === 'paper') {
+        const trades = readPaperTrades();
+        const paperTrade = {
+          id: `paper-${signal.id}`,
+          symbol: signal.symbol,
+          side: signal.direction,
+          entryPrice: signal.entryPrice,
+          exitPrice: signal.entryPrice,
+          size: 0.001,
+          pnl: 0,
+          pnlPct: 0,
+          confidence: signal.confidence,
+          regime: signal.regime,
+          entryTime: new Date().toLocaleString(),
+          exitTime: new Date().toLocaleString(),
+          duration: '0m',
+          exitReason: 'Paper trade',
+          slippage: 0,
+          entryTimestamp: Date.now(),
+          exitTimestamp: Date.now(),
+          status: 'open',
+          leverage: 5,
+          liquidationPrice: signal.entryPrice * 0.95,
+          source: 'paper',
+        };
+        writePaperTrades([...trades, paperTrade]);
+        setSignals(prev => prev.map(s => s.id === signal.id ? { ...s, status: 'executed' } : s));
+        return;
+      }
+
+      const { apiKey, apiSecret } = getApiCredentials();
+      if (!apiKey || !apiSecret) {
+        throw new Error('Live trading credentials are not configured. Add them in Settings first.');
+      }
+
+      // Enforce global max concurrent live trades
+      const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '10', 10);
+      const currentLive = readLiveTrades().filter(t => t.status === 'open').length;
+      if (currentLive >= MAX_CONCURRENT_LIVE) {
+        throw new Error('Max concurrent live trades reached');
+      }
+
+      // Calculate conservative live order size based on total equity and risk.
+      // Use a short-lived cache to avoid repeated /api/bybit calls during bursts.
+      let available = 0;
+      const now = Date.now();
+      if (walletCacheRef.current && (now - walletCacheRef.current.ts) < 60000) {
+        available = walletCacheRef.current.available;
+      } else {
+        const wallet = await fetchBybitWalletBalance(apiKey, apiSecret);
+        available = wallet.availableBalance > 0 ? wallet.availableBalance : wallet.totalEquity;
+        walletCacheRef.current = { available, ts: now };
+      }
+      // Use 10% of total equity for each trade by default (can be overridden
+      // by NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT).
+      const maxRiskPct = parseFloat(process.env.NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT || '10');
+      const accountRisk = available * (maxRiskPct / 100);
+      const priceDiff = Math.abs(signal.entryPrice - signal.sl);
+      let size = priceDiff > 0 ? accountRisk / priceDiff : 0;
+      const MIN_SIZE = 0.0001;
+      if (size < MIN_SIZE) {
+        throw new Error('Calculated order size too small for live execution');
+      }
+
+      // Ensure margin requirement fits available balance (use leverage 5)
+      const leverage = 5;
+      const requiredMargin = (size * signal.entryPrice) / leverage;
+      if (requiredMargin > available) {
+        // If required margin exceeds available, fall back to using the
+        // configured percent of total equity (times leverage).
+        size = (available * (maxRiskPct / 100) * leverage) / signal.entryPrice;
+        if (size < MIN_SIZE) throw new Error('Insufficient funds to place order');
+      }
+
+      const normalizedQty = await normalizeBybitQty(signal.symbol, size);
+      if (!Number.isFinite(normalizedQty) || normalizedQty <= 0) {
+        throw new Error('Live order quantity invalid after normalization');
+      }
+
+      const orderResult = await placeBybitOrder({
+        symbol: signal.symbol,
+        side: signal.direction,
+        qty: normalizedQty,
+        leverage,
+        apiKey,
+        apiSecret,
+        stopLoss: signal.sl,
+        takeProfit: signal.tp1,
+      });
+
+      if (!orderResult.success) {
+        throw new Error(orderResult.error || 'Bybit rejected the order');
+      }
+
+      const liveTrades = readLiveTrades();
+      writeLiveTrades([...liveTrades, {
+        id: `live-${signal.id}`,
+        symbol: signal.symbol,
+        side: signal.direction,
+        entryPrice: signal.entryPrice,
+        exitPrice: signal.entryPrice,
+        size: normalizedQty,
+        pnl: 0,
+        pnlPct: 0,
+        confidence: signal.confidence,
+        regime: signal.regime,
+        entryTime: new Date().toLocaleString(),
+        exitTime: new Date().toLocaleString(),
+        duration: '0m',
+        exitReason: 'Live order placed',
+        slippage: 0,
+        entryTimestamp: Date.now(),
+        exitTimestamp: Date.now(),
+        status: 'open',
+        leverage,
+        liquidationPrice: signal.entryPrice * 0.95,
+        source: 'live',
+        orderId: orderResult.orderId,
+      }] );
+
+      appendSharedAlert({
+        id: `alert-live-order-${signal.id}-${Date.now()}`,
+        type: 'trade',
+        priority: 'high',
+        title: 'Live order executed',
+        message: `Bybit order ${orderResult.orderId} placed for ${signal.symbol} ${signal.direction}.`, 
+        time: new Date().toLocaleTimeString(),
+        read: false,
+        timestamp: Date.now(),
+        symbol: signal.symbol,
+        price: signal.entryPrice,
+      });
+
+      setSignals(prev => prev.map(s => s.id === signal.id ? { ...s, status: 'executed' } : s));
+    } catch (err: any) {
+      console.error('Signal execution failed:', err);
+      setError(err.message || 'Failed to execute signal');
+    } finally {
+      setExecutingSignalId(null);
+    }
   };
 
   const handleDeleteSignal = (id: string) => {
@@ -541,7 +738,7 @@ export default function SignalEnginePage() {
           <div className="flex items-center gap-3">
             {connectionStatus === 'error' && (
               <button
-                onClick={() => { disconnectWebSocket(); setTimeout(connectWebSocket, 1000); }}
+                onClick={() => { realtimeManager.triggerRefresh(); }}
                 className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
               >
                 Reconnect
@@ -731,13 +928,22 @@ export default function SignalEnginePage() {
                           </button>
                           <div className="flex items-center gap-1 shrink-0">
                             {signal.status === 'pending' && (
-                              <button
-                                onClick={() => handleExecuteSignal(signal.id)}
-                                className="p-1.5 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
-                                title="Execute signal"
-                              >
-                                <CheckCircle size={14} />
-                              </button>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => void handleExecuteSignal(signal, 'paper')}
+                                  disabled={executingSignalId === signal.id}
+                                  className="px-2 py-1 text-[11px] font-semibold rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-60"
+                                >
+                                  {executingSignalId === signal.id ? <Loader2 size={12} className="animate-spin" /> : 'Paper'}
+                                </button>
+                                <button
+                                  onClick={() => void handleExecuteSignal(signal, 'live')}
+                                  disabled={executingSignalId === signal.id}
+                                  className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+                                >
+                                  {executingSignalId === signal.id ? <Loader2 size={12} className="animate-spin" /> : 'Live'}
+                                </button>
+                              </div>
                             )}
                             <button
                               onClick={() => setExpandedId(isExpanded ? null : signal.id)}

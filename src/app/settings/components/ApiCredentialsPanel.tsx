@@ -3,6 +3,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, safeJsonParse } from '@/lib/bybit';
 import { Eye, EyeOff, CheckCircle2, XCircle, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 type TradingMode = 'paper' | 'live';
@@ -26,58 +27,38 @@ interface TestResult {
 }
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 
 // ============== API HELPERS ==============
-const generateSignature = (apiKey: string, apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  // Bybit V5 signature format: timestamp + apiKey + recvWindow + params
-  const paramStr = timestamp + apiKey + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
 
 // ============== API FUNCTIONS ==============
 
 // Fetch wallet balance
 const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ totalEquity: string; availableBalance: string; uid: string }> => {
   try {
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiKey, apiSecret, timestamp, recvWindow, params);
+    const params = 'accountType=UNIFIED';
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance?${params}`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
-    
-    if (data?.retCode === 0 && data?.result) {
-      const wallet = data.result.list?.[0];
+
+    if (data?.retCode === 0) {
+      const wallet = data?.result?.list?.[0] || data?.result || {};
+      const totalEquity = wallet?.totalEquity ?? wallet?.equity ?? wallet?.walletBalance ?? wallet?.balance ?? '0';
+      const availableBalance = wallet?.availableBalance ?? wallet?.available ?? wallet?.walletBalance ?? wallet?.balance ?? '0';
+      const uid = data?.result?.uid || data?.result?.accountUid || wallet?.uid || 'N/A';
+
       return {
-        totalEquity: wallet?.totalEquity || wallet?.equity || '0',
-        availableBalance: wallet?.availableBalance || wallet?.available || '0',
-        uid: data.result.uid || data.result.accountUid || 'N/A',
+        totalEquity: String(totalEquity),
+        availableBalance: String(availableBalance),
+        uid,
       };
     }
-    
-    // Handle error response
+
     const errorMsg = data?.retMsg || 'Unknown error';
     const errorCode = data?.retCode || 'Unknown';
     throw new Error(`Error ${errorCode}: ${errorMsg}`);
@@ -90,19 +71,13 @@ const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ 
 // Fetch account info
 const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ accountType: string; uid: string }> => {
   try {
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
-    const params = '';
-    const signature = generateSignature(apiKey, apiSecret, timestamp, recvWindow, params);
+    const params = 'accountType=UNIFIED';
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/info`, {
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/info?${params}`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -174,7 +149,10 @@ export default function ApiCredentialsPanel() {
       const latency = Date.now() - start;
       
       const balanceNum = parseFloat(balanceData.totalEquity);
-      const balanceDisplay = balanceNum > 0 ? `${balanceNum.toFixed(2)} USDT` : '0.00 USDT';
+      const availableNum = parseFloat(balanceData.availableBalance);
+      const balanceDisplay = Number.isFinite(balanceNum) && balanceNum > 0 ? `${balanceNum.toFixed(2)} USDT` : '0.00 USDT';
+      const availableDisplay = Number.isFinite(availableNum) && availableNum > 0 ? `${availableNum.toFixed(2)} USDT` : '0.00 USDT';
+      const totalDisplay = Number.isFinite(balanceNum) && balanceNum > 0 ? `${balanceNum.toFixed(2)} USDT` : '0.00 USDT';
 
       setTestResult((prev) => ({
         ...prev,
@@ -186,8 +164,8 @@ export default function ApiCredentialsPanel() {
             balance: balanceDisplay,
             uid: accountData.uid,
             accountType: accountData.accountType,
-            availableBalance: balanceData.availableBalance !== '0' ? `${parseFloat(balanceData.availableBalance).toFixed(2)} USDT` : '0.00 USDT',
-            totalEquity: balanceData.totalEquity !== '0' ? `${parseFloat(balanceData.totalEquity).toFixed(2)} USDT` : '0.00 USDT',
+            availableBalance: availableDisplay,
+            totalEquity: totalDisplay,
           },
         },
       }));

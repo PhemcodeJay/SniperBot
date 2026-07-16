@@ -12,9 +12,8 @@ import {
   ResponsiveContainer,
   CartesianGrid,
   ReferenceLine,
-  Loader2,
-  AlertCircle,
 } from 'recharts';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface EquityPoint {
   date: string;

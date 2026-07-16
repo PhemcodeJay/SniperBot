@@ -3,6 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
 import {
   Power,
   AlertTriangle,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { toast } from 'sonner';
+import { realtimeManager } from '@/lib/realtimeManager';
 
 interface SystemStatus {
   websocket: { status: 'connected' | 'disconnected' | 'connecting' | 'authenticated'; latency: number };
@@ -36,34 +38,12 @@ interface Position {
 }
 
 // ============== BYBIT API CONFIG ==============
-const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 
 // ============== API HELPERS ==============
-const getApiCredentials = () => {
-  return {
-    apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
-    apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
-  };
-};
-
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
-  const crypto = require('crypto');
-  const paramStr = timestamp + apiSecret + recvWindow + params;
-  return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
-};
-
-const safeJsonParse = async (response: Response) => {
-  try {
-    const text = await response.text();
-    if (!text || text.trim() === '') return null;
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-};
+const getApiCredentials = () => getBybitCredentials();
 
 // ============== API FUNCTIONS ==============
 
@@ -73,19 +53,13 @@ const fetchAccountInfo = async (): Promise<{ type: string; uid: string } | null>
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return null;
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/account/info`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -109,19 +83,13 @@ const fetchPositions = async (): Promise<Position[]> => {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return [];
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const params = '';
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list`, {
       method: 'GET',
-      headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
-      },
+      headers,
     });
 
     const data = await safeJsonParse(response);
@@ -157,19 +125,15 @@ const closePositionOnBybit = async (symbol: string, positionIdx: number, size: n
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return false;
 
-    const timestamp = Date.now().toString();
     const recvWindow = '5000';
     const orderSide = side === 'long' ? 'Sell' : 'Buy';
     const params = `category=linear&symbol=${symbol}&side=${orderSide}&orderType=Market&qty=${size}&timeInForce=GTC&positionIdx=${positionIdx}`;
-    const signature = generateSignature(apiSecret, timestamp, recvWindow, params);
+    const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
       method: 'POST',
       headers: {
-        'X-BAPI-API-KEY': apiKey,
-        'X-BAPI-TIMESTAMP': timestamp,
-        'X-BAPI-SIGN': signature,
-        'X-BAPI-RECV-WINDOW': recvWindow,
+        ...headers,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -262,114 +226,19 @@ export default function BotControlPanel() {
     }
   };
 
-  // Connect WebSocket
-  const connectWebSocket = () => {
-    try {
-      setSystemStatus(prev => ({
-        ...prev,
-        websocket: { ...prev.websocket, status: 'connecting' },
-      }));
-
-      const ws = new WebSocket(BYBIT_WS_URL);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        setSystemStatus(prev => ({
-          ...prev,
-          websocket: { ...prev.websocket, status: 'connected', latency: 0 },
-        }));
-
-        ws.send(JSON.stringify({
-          op: 'subscribe',
-          args: SUPPORTED_SYMBOLS.map(s => `tickers.${s}`)
-        }));
-
-        startHeartbeat();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.topic === 'tickers') {
-            // Update last scan time on price updates
-            setLastScan(new Date().toLocaleTimeString());
-            setSystemStatus(prev => ({
-              ...prev,
-              signalEngine: { ...prev.signalEngine, lastRun: new Date().toLocaleTimeString() },
-            }));
-          } else if (data.op === 'pong') {
-            setSystemStatus(prev => ({
-              ...prev,
-              websocket: { ...prev.websocket, latency: 0 },
-            }));
-          }
-        } catch (err) {
-          // Ignore
-        }
-      };
-
-      ws.onerror = () => {
-        setSystemStatus(prev => ({
-          ...prev,
-          websocket: { ...prev.websocket, status: 'disconnected' },
-        }));
-      };
-
-      ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        setSystemStatus(prev => ({
-          ...prev,
-          websocket: { ...prev.websocket, status: 'disconnected' },
-        }));
-        stopHeartbeat();
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-        }
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
-      };
-    } catch (err) {
-      console.error('Failed to connect WebSocket:', err);
-      setSystemStatus(prev => ({
-        ...prev,
-        websocket: { ...prev.websocket, status: 'disconnected' },
-      }));
-    }
-  };
-
-  const startHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-    }
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ op: 'ping' }));
-      }
-    }, 30000);
-  };
-
-  const stopHeartbeat = () => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-  };
-
-  const disconnectWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'Normal closure');
-      wsRef.current = null;
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-    stopHeartbeat();
-  };
+  // Use singleton realtime manager for ticks
+  const disconnectWebSocket = () => { /* noop - singleton handles lifecycle */ };
 
   useEffect(() => {
     fetchSystemStatus();
-    connectWebSocket();
+
+    const unsubscribe = realtimeManager.subscribeTicks(() => {
+      setLastScan(new Date().toLocaleTimeString());
+      setSystemStatus(prev => ({
+        ...prev,
+        signalEngine: { ...prev.signalEngine, lastRun: new Date().toLocaleTimeString() },
+      }));
+    });
 
     const interval = setInterval(fetchSystemStatus, 30000);
     const scanInterval = setInterval(() => {
@@ -383,7 +252,7 @@ export default function BotControlPanel() {
     return () => {
       clearInterval(interval);
       clearInterval(scanInterval);
-      disconnectWebSocket();
+      unsubscribe();
     };
   }, []);
 
@@ -444,9 +313,8 @@ export default function BotControlPanel() {
     toast.info('Restarting signal engine...');
 
     try {
-      disconnectWebSocket();
-      await new Promise((r) => setTimeout(r, 500));
-      connectWebSocket();
+      // Use singleton to trigger refresh instead of per-component socket ops
+      realtimeManager.triggerRefresh();
       await fetchSystemStatus();
       setLastScan(new Date().toLocaleTimeString());
       setNextScan('5m');
