@@ -487,7 +487,7 @@ export default function SignalEnginePage() {
       }
 
       // Enforce global max concurrent live trades
-      const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '10', 10);
+      const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '50', 50);
       const currentLive = readLiveTrades().filter(t => t.status === 'open').length;
       if (currentLive >= MAX_CONCURRENT_LIVE) {
         throw new Error('Max concurrent live trades reached');
