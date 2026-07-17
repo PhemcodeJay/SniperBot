@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import { formatUsd } from '@/lib/formatters';
 import { 
   Shield, Save, AlertTriangle, RotateCcw, CheckCircle, 
   Info, Zap, TrendingDown, Settings, Lock, Unlock,
@@ -96,14 +97,14 @@ const fetchWalletBalance = async (): Promise<{ totalEquity: number; availableBal
   try {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) {
-      return { totalEquity: 100, availableBalance: 100 };
+      return { totalEquity: 0, availableBalance: 0 };
     }
 
     const recvWindow = '5000';
-    const params = '';
+    const params = 'accountType=UNIFIED';
     const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance`, {
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance?${params}`, {
       method: 'GET',
       headers,
     });
@@ -111,15 +112,18 @@ const fetchWalletBalance = async (): Promise<{ totalEquity: number; availableBal
     const data = await safeJsonParse(response);
     if (data?.retCode === 0 && data?.result?.list?.[0]) {
       const wallet = data.result.list[0];
+      const totalEquity = parseFloat(wallet.totalEquity || wallet.equity || '0');
+      const availableBalance = parseFloat(wallet.availableBalance || wallet.available || wallet.totalAvailableBalance || '0');
       return {
-        totalEquity: parseFloat(wallet.totalEquity || '100'),
-        availableBalance: parseFloat(wallet.availableBalance || '100'),
+        totalEquity: Number.isFinite(totalEquity) ? totalEquity : 0,
+        availableBalance: Number.isFinite(availableBalance) ? availableBalance : 0,
       };
     }
-    return { totalEquity: 100, availableBalance: 100 };
+
+    return { totalEquity: 0, availableBalance: 0 };
   } catch (error) {
     console.error('Error fetching wallet balance:', error);
-    return { totalEquity: 100, availableBalance: 100 };
+    return { totalEquity: 0, availableBalance: 0 };
   }
 };
 
@@ -198,8 +202,8 @@ export default function RiskRulesPage() {
     riskScore: 'Low',
     maxLossPerTrade: 0,
     dailyLossLimit: 0,
-    totalEquity: 100,
-    availableBalance: 100,
+    totalEquity: 0,
+    availableBalance: 0,
   });
   const [marketData, setMarketData] = useState<Record<string, any>>({});
 
@@ -260,7 +264,9 @@ export default function RiskRulesPage() {
         const positionValue = entryPrice * Math.abs(size);
         
         totalPnL += pnl;
-        totalExposure += (positionValue * leverage) / totalEquity * 100;
+        if (totalEquity > 0) {
+          totalExposure += (positionValue * leverage) / totalEquity * 100;
+        }
         
         // Check correlation (simplified)
         const change24h = tickers[pos.symbol] ? parseFloat(tickers[pos.symbol].price24hPcnt) * 100 : 0;
@@ -270,7 +276,7 @@ export default function RiskRulesPage() {
       });
 
       // Calculate drawdown
-      const dailyLossPct = Math.min(100, Math.abs(totalPnL) / totalEquity * 100);
+      const dailyLossPct = totalEquity > 0 ? Math.min(100, Math.abs(totalPnL) / totalEquity * 100) : 0;
       const weeklyDrawdown = Math.min(15, dailyLossPct * 1.5 + Math.random() * 2);
       const monthlyDrawdown = Math.min(25, dailyLossPct * 2 + Math.random() * 3);
 
@@ -572,9 +578,9 @@ export default function RiskRulesPage() {
         {/* Risk Assessment Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Total Equity', value: `$${riskAssessment.totalEquity.toFixed(2)}`, color: 'text-blue-600' },
+            { label: 'Total Equity', value: formatUsd(riskAssessment.totalEquity, '$0.00', true), color: 'text-blue-600' },
             { label: 'Current Exposure', value: `${riskAssessment.currentExposure}%`, color: riskAssessment.currentExposure > 10 ? 'text-yellow-600' : 'text-green-600' },
-            { label: 'Daily P&L', value: `${riskAssessment.dailyPnL >= 0 ? '+' : ''}$${riskAssessment.dailyPnL.toFixed(2)}`, color: riskAssessment.dailyPnL >= 0 ? 'text-green-600' : 'text-red-600' },
+            { label: 'Daily P&L', value: `${riskAssessment.dailyPnL >= 0 ? '+' : ''}${formatUsd(riskAssessment.dailyPnL, '$0.00', true)}`, color: riskAssessment.dailyPnL >= 0 ? 'text-green-600' : 'text-red-600' },
             { label: 'Risk Score', value: riskAssessment.riskScore, color: riskAssessment.riskScore === 'Low' ? 'text-green-600' : riskAssessment.riskScore === 'Critical' ? 'text-red-600' : 'text-yellow-600' },
           ].map((card) => (
             <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">

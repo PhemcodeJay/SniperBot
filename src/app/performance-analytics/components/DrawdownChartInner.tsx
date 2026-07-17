@@ -14,6 +14,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { Loader2, AlertCircle } from 'lucide-react';
+import { formatUsd } from '@/lib/formatters';
 
 interface DrawdownPoint {
   time: string;
@@ -323,10 +324,10 @@ export default function DrawdownChartInner() {
       <div className="mt-3 pt-3 border-t border-border">
         <div className="flex justify-between text-[10px] text-muted-foreground">
           <span>
-            Peak: <span className="text-foreground font-mono">${stats.peakPrice.toFixed(2)}</span>
+            Peak: <span className="text-foreground font-mono">{formatUsd(stats.peakPrice)}</span>
           </span>
           <span>
-            Trough: <span className="text-foreground font-mono">${stats.troughPrice.toFixed(2)}</span>
+            Trough: <span className="text-foreground font-mono">{formatUsd(stats.troughPrice)}</span>
           </span>
           <span>
             Recovery: <span className="text-foreground font-mono">{stats.recoveryTime > 0 ? `${stats.recoveryTime}h` : 'N/A'}</span>

@@ -4,6 +4,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
+import { formatUsd } from '@/lib/formatters';
 import {
   LayoutDashboard,
   BarChart3,
@@ -16,7 +18,6 @@ import {
   ChevronRight,
   Bot,
   Wallet,
-  Activity
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -42,6 +43,12 @@ const navItems: NavItem[] = [
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const { data: realtimeData } = useSharedRealtimeData();
+  const balanceLabel = formatUsd(
+    realtimeData?.balance?.totalEquity ?? realtimeData?.balance?.availableBalance ?? 0,
+    '$0.00',
+    true
+  );
 
   return (
     <div
@@ -108,7 +115,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </div>
             <div className="flex items-center gap-2 mt-1">
               <Wallet size={12} className="text-gray-400" />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">$0.00</span>
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{balanceLabel}</span>
             </div>
           </div>
         )}

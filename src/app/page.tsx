@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
 import { BYBIT_BASE_URL, getBybitCredentials, createBybitAuthHeaders, safeJsonParse, fetchBybitWalletBalance } from '@/lib/bybit';
+import { formatUsd } from '@/lib/formatters';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 import { appendSharedAlert, calculateLivePnl, getSharedTradingState, setSharedBalance, setSharedBotState, setSharedMetrics, setSharedSignals, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
 import { 
@@ -462,7 +463,7 @@ export default function Home() {
       setBaseEquity(state.balance.baseEquity);
       setPaperEquity(state.balance.totalEquity);
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   // Sync real-time data from context
@@ -1018,7 +1019,7 @@ export default function Home() {
             <span className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
               metrics.totalPnl >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
             }`}>
-              Total P&L: {metrics.totalPnl >= 0 ? '+' : ''}${metrics.totalPnl.toFixed(2)}
+              Total P&L: {metrics.totalPnl >= 0 ? '+' : ''}{formatUsd(metrics.totalPnl, '$0.00', true)}
             </span>
             <button
               onClick={fetchAllData}
@@ -1095,9 +1096,9 @@ export default function Home() {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {[
-            { label: 'Total Equity', value: `$${metrics.equity.toFixed(2)}`, change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`, color: metrics.totalPnlPct >= 0 ? 'text-green-600' : 'text-red-600' },
-            { label: 'Total P&L', value: `${metrics.totalPnl >= 0 ? '+' : ''}$${metrics.totalPnl.toFixed(2)}`, change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`, color: metrics.totalPnl >= 0 ? 'text-green-600' : 'text-red-600' },
-            { label: 'Daily P&L', value: `${metrics.dailyPnl >= 0 ? '+' : ''}$${metrics.dailyPnl.toFixed(2)}`, change: `${metrics.dailyPnlPct >= 0 ? '+' : ''}${metrics.dailyPnlPct.toFixed(2)}%`, color: metrics.dailyPnl >= 0 ? 'text-green-600' : 'text-red-600' },
+            { label: 'Total Equity', value: formatUsd(metrics.equity, '$0.00', true), change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`, color: metrics.totalPnlPct >= 0 ? 'text-green-600' : 'text-red-600' },
+            { label: 'Total P&L', value: `${metrics.totalPnl >= 0 ? '+' : ''}${formatUsd(metrics.totalPnl, '$0.00', true)}`, change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`, color: metrics.totalPnl >= 0 ? 'text-green-600' : 'text-red-600' },
+            { label: 'Daily P&L', value: `${metrics.dailyPnl >= 0 ? '+' : ''}${formatUsd(metrics.dailyPnl, '$0.00', true)}`, change: `${metrics.dailyPnlPct >= 0 ? '+' : ''}${metrics.dailyPnlPct.toFixed(2)}%`, color: metrics.dailyPnl >= 0 ? 'text-green-600' : 'text-red-600' },
             { label: 'Open Positions', value: metrics.openPositions.toString(), change: `${metrics.riskExposure.toFixed(1)}% exposure`, color: 'text-blue-600' },
             { label: 'Win Rate', value: `${metrics.winRate.toFixed(1)}%`, change: `${metrics.totalTrades} trades`, color: metrics.winRate >= 60 ? 'text-green-600' : 'text-yellow-600' },
           ].map((card) => (

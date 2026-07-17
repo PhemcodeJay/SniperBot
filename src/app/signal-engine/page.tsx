@@ -66,20 +66,6 @@ const MIN_RESCAN_INTERVAL_MS = 20000;
 // ============== API HELPERS ==============
 const getApiCredentials = () => getBybitCredentials();
 
-const readPaperTrades = (): any[] => {
-  if (typeof window === 'undefined') return [];
-  try {
-    return JSON.parse(window.localStorage.getItem('paper_trades') || '[]');
-  } catch {
-    return [];
-  }
-};
-
-const writePaperTrades = (trades: any[]) => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem('paper_trades', JSON.stringify(trades));
-  window.dispatchEvent(new CustomEvent('bybit-trades-updated'));
-};
 
 const formatPrice = (price: number): string => {
   if (price >= 1000) return price.toFixed(2);
@@ -168,7 +154,7 @@ export default function SignalEnginePage() {
     const unsubscribe = subscribeToSharedTradingState((state) => {
       setSignals(state.signals);
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -461,7 +447,7 @@ export default function SignalEnginePage() {
         try {
           // Await to serialize the requests
           // eslint-disable-next-line no-await-in-loop
-          await handleExecuteSignal(signal, 'live');
+          await handleExecuteSignal(signal);
         } catch (e) {
           // swallow here since handleExecuteSignal handles errors
         } finally {
@@ -490,41 +476,11 @@ export default function SignalEnginePage() {
     }
   };
 
-  const handleExecuteSignal = async (signal: Signal, mode: 'paper' | 'live') => {
+  const handleExecuteSignal = async (signal: Signal) => {
     setExecutingSignalId(signal.id);
     setError(null);
 
     try {
-      if (mode === 'paper') {
-        const trades = readPaperTrades();
-        const paperTrade = {
-          id: `paper-${signal.id}`,
-          symbol: signal.symbol,
-          side: signal.direction,
-          entryPrice: signal.entryPrice,
-          exitPrice: signal.entryPrice,
-          size: 0.001,
-          pnl: 0,
-          pnlPct: 0,
-          confidence: signal.confidence,
-          regime: signal.regime,
-          entryTime: new Date().toLocaleString(),
-          exitTime: new Date().toLocaleString(),
-          duration: '0m',
-          exitReason: 'Paper trade',
-          slippage: 0,
-          entryTimestamp: Date.now(),
-          exitTimestamp: Date.now(),
-          status: 'open',
-          leverage: 5,
-          liquidationPrice: signal.entryPrice * 0.95,
-          source: 'paper',
-        };
-        writePaperTrades([...trades, paperTrade]);
-        setSignals(prev => prev.map(s => s.id === signal.id ? { ...s, status: 'executed' } : s));
-        return;
-      }
-
       const { apiKey, apiSecret } = getApiCredentials();
       if (!apiKey || !apiSecret) {
         throw new Error('Live trading credentials are not configured. Add them in Settings first.');
@@ -929,7 +885,7 @@ export default function SignalEnginePage() {
                           <div className="flex items-center gap-1 shrink-0">
                             {signal.status === 'pending' && (
                               <button
-                                onClick={() => void handleExecuteSignal(signal, 'live')}
+                                onClick={() => void handleExecuteSignal(signal)}
                                 disabled={executingSignalId === signal.id}
                                 className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
                               >

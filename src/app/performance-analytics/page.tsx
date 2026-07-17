@@ -5,6 +5,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { BYBIT_BASE_URL, createBybitAuthHeaders, fetchBybitWalletBalance, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import { formatUsd } from '@/lib/formatters';
+import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 import { calculateLivePnl, getSharedTradingState, setSharedMetrics, subscribeToSharedTradingState } from '@/lib/tradingState';
 import { 
   TrendingUp, TrendingDown, DollarSign, Activity, 
@@ -170,6 +172,7 @@ const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => 
 // ============== COMPONENT ==============
 
 export default function PerformanceAnalyticsPage() {
+  const { data: realtimeData } = useSharedRealtimeData();
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting' | 'error'>('connecting');
@@ -197,7 +200,7 @@ export default function PerformanceAnalyticsPage() {
       setTotalPnl(state.metrics.totalPnl);
       setMetrics(prev => prev ? ({ ...prev, totalPnl: state.metrics.totalPnl, dailyPnl: state.metrics.dailyPnl, totalTrades: state.metrics.totalTrades, winRate: state.metrics.winRate }) : prev);
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   // Calculate performance metrics from real data
@@ -324,7 +327,9 @@ export default function PerformanceAnalyticsPage() {
         fetchTickers(SUPPORTED_SYMBOLS),
       ]);
 
-      const currentEquity = wallet.totalEquity;
+      const currentEquity = realtimeData?.balance?.totalEquity > 0
+        ? realtimeData.balance.totalEquity
+        : wallet.totalEquity;
       const baseEquityValue = 100; // Starting equity
       
       setBaseEquity(baseEquityValue);
@@ -350,7 +355,7 @@ export default function PerformanceAnalyticsPage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [hasValidCredentials]);
+  }, [hasValidCredentials, realtimeData]);
 
   const disconnectWebSocket = useCallback(() => { /* noop - singleton manages WS */ }, []);
   const lastAnalyticsRefreshRef = useRef<number>(0);
@@ -467,12 +472,20 @@ export default function PerformanceAnalyticsPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
               <Wallet size={14} className="text-green-600 dark:text-green-400" />
               <span className="text-xs font-medium text-green-700 dark:text-green-400">
-                Total P&L: {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+                Total P&L: {totalPnl >= 0 ? '+' : ''}{formatUsd(totalPnl, '$0.00', true)}
               </span>
             </div>
+            {realtimeData?.balance?.totalEquity > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                <Wallet size={14} className="text-blue-600 dark:text-blue-400" />
+                <span className="text-xs font-medium text-blue-700 dark:text-blue-400">
+                  Account Equity: {formatUsd(realtimeData.balance.totalEquity, '$0.00', true)}
+                </span>
+              </div>
+            )}
             <button 
               onClick={handleRefresh} 
               disabled={isRefreshing}
@@ -487,10 +500,10 @@ export default function PerformanceAnalyticsPage() {
         {metrics && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total P&L', value: `$${metrics.totalPnl.toFixed(2)}`, change: `${metrics.totalReturn >= 0 ? '+' : ''}${metrics.totalReturn.toFixed(1)}%`, color: metrics.totalReturn >= 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Total P&L', value: formatUsd(metrics.totalPnl, '$0.00', true), change: `${metrics.totalReturn >= 0 ? '+' : ''}${metrics.totalReturn.toFixed(1)}%`, color: metrics.totalReturn >= 0 ? 'text-green-600' : 'text-red-600' },
               { label: 'Win Rate', value: `${metrics.winRate.toFixed(1)}%`, change: `${metrics.winningTrades}/${metrics.totalTrades} trades`, color: 'text-blue-600' },
               { label: 'Profit Factor', value: metrics.profitFactor.toFixed(2), change: `Sharpe ${metrics.sharpeRatio.toFixed(2)}`, color: 'text-purple-600' },
-              { label: 'Max Drawdown', value: `${metrics.maxDrawdown.toFixed(1)}%`, change: `Equity $${metrics.currentEquity.toFixed(2)}`, color: metrics.maxDrawdown > -5 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Max Drawdown', value: `${metrics.maxDrawdown.toFixed(1)}%`, change: `Equity ${formatUsd(metrics.currentEquity, '$0.00', true)}`, color: metrics.maxDrawdown > -5 ? 'text-green-600' : 'text-red-600' },
             ].map((card) => (
               <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <div className="flex items-center justify-between">

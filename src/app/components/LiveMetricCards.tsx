@@ -2,9 +2,10 @@
 
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 import { getSharedTradingState, subscribeToSharedTradingState } from '@/lib/tradingState';
+import { formatUsd } from '@/lib/formatters';
 import {
   TrendingUp,
   TrendingDown,
@@ -28,15 +29,6 @@ interface MetricCardProps {
   variant?: 'default' | 'positive' | 'negative' | 'warning';
   span?: 1 | 2;
   mono?: boolean;
-}
-
-interface LiveMetrics {
-  equity: { value: number; balance: number; unrealized: number };
-  pnl: { daily: number; pct: number };
-  winrate: { rate: number; wins: number; losses: number; total: number };
-  heat: { pct: number; positions: number; max: number };
-  sharpe: { ratio: number; sortino: number };
-  drawdown: { used: number; limit: number; remaining: number };
 }
 
 // ============== COMPONENT ==============
@@ -106,7 +98,7 @@ export default function LiveMetricCards() {
 
   useEffect(() => {
     const unsub = subscribeToSharedTradingState((s) => setSharedState(s));
-    return unsub;
+    return () => unsub();
   }, []);
 
   // Calculate metrics from real-time data
@@ -125,45 +117,30 @@ export default function LiveMetricCards() {
     return sum + (parseFloat(pos.size) * parseFloat(pos.markPrice));
   }, 0) || 0;
 
-  const isConnected = !error && balance > 0;
-
-        const volatility = Math.abs(change24h);
-        const dailyPnl = balance * (change24h / 100) * 0.3;
-        const currentEquity = balance + dailyPnl;
-
-        const winRate = Math.min(85, 55 + volatility * 1.5);
-        const wins = Math.round((winRate / 100) * 15);
-        const losses = 15 - wins;
-
-        setMetrics({
-          equity: {
-            value: currentEquity,
-            balance: balance,
-            unrealized: dailyPnl,
-          },
-          pnl: {
-            daily: dailyPnl,
-            pct: (dailyPnl / balance) * 100,
-          },
-          winrate: {
-            rate: Math.round(winRate * 10) / 10,
-            wins: wins,
-            losses: losses,
-            total: 15,
-          },
-          heat: {
-            pct: Math.min(8, 1 + volatility * 0.3),
-            positions: positionsCount || Math.floor(1 + Math.random() * 2),
-            max: 5,
-          },
-          sharpe: {
-            ratio: 1.2 + volatility * 0.08,
-            sortino: 1.8 + volatility * 0.08,
-          },
   const formatCurrency = (value: number) => {
     if (!showBalance) return '••••••';
-    return `$${value.toFixed(2)}`;
+    return formatUsd(value, '$0.00', true);
   };
+
+  const isConnected = useMemo(() => !error && !!realtimeData, [error, realtimeData]);
+
+  const {
+    balanceLabel,
+    availableBalanceLabel,
+    positionsValueLabel,
+    connectionStatus,
+    connectionSubText,
+    equityChangeText,
+  } = useMemo(() => {
+    return {
+      balanceLabel: formatCurrency(balance),
+      availableBalanceLabel: formatCurrency(availableBalance),
+      positionsValueLabel: formatCurrency(totalPositionValue),
+      connectionStatus: isConnected ? 'Live' : 'Offline',
+      connectionSubText: error ? 'API Error' : 'Connected to Bybit',
+      equityChangeText: positionCount > 0 ? `+${(positionCount * 0.5).toFixed(2)}%` : '0%',
+    };
+  }, [balance, availableBalance, totalPositionValue, error, isConnected, positionCount, showBalance]);
 
   if (isLoading || !realtimeData) {
     return (
@@ -181,10 +158,10 @@ export default function LiveMetricCards() {
     {
       id: 'metric-equity',
       title: `Account Equity ${isConnected ? '🟢' : '🔴'}`,
-      value: formatCurrency(balance),
-      subValue: `Available: ${formatCurrency(availableBalance)} · Positions: ${positionCount}`,
-      change: `${positionCount > 0 ? `+${(positionCount * 0.5).toFixed(2)}%` : '0%'}`,
-      changePositive: positionCount >= 0,
+      value: balanceLabel,
+      subValue: `Available: ${availableBalanceLabel} · Positions: ${positionCount}`,
+      change: equityChangeText,
+      changePositive: positionCount > 0,
       icon: DollarSign,
       variant: isConnected ? 'positive' : 'default',
       span: 2,
@@ -194,7 +171,7 @@ export default function LiveMetricCards() {
       id: 'metric-positions',
       title: 'Open Positions',
       value: `${positionCount}`,
-      subValue: `Total Value: ${formatCurrency(totalPositionValue)}`,
+      subValue: `Total Value: ${positionsValueLabel}`,
       change: `${positionCount > 0 ? '+' : ''}${positionCount}`,
       changePositive: positionCount > 0,
       icon: Activity,
@@ -204,7 +181,7 @@ export default function LiveMetricCards() {
     {
       id: 'metric-balance',
       title: 'Total Balance',
-      value: formatCurrency(balance),
+      value: balanceLabel,
       subValue: isConnected ? 'Live from Bybit' : 'Disconnected',
       change: '0%',
       changePositive: true,
@@ -214,8 +191,8 @@ export default function LiveMetricCards() {
     {
       id: 'metric-status',
       title: 'Connection',
-      value: isConnected ? 'Live' : 'Offline',
-      subValue: error ? 'API Error' : 'Connected to Bybit',
+      value: connectionStatus,
+      subValue: connectionSubText,
       change: isConnected ? 'Active' : 'Inactive',
       changePositive: isConnected,
       icon: Loader2,

@@ -78,7 +78,7 @@ npm run format
 npm run dev
 ```
 
-Open http://localhost:4028 in browser.
+Open http://sniperbot.space:4028 in browser.
 
 ### 6. Deploy to Production
 
@@ -117,12 +117,12 @@ The bot automatically syncs:
 
 ### Dashboard Access
 
-- **Main Dashboard**: http://localhost:4028
-- **Performance Analytics**: http://localhost:4028/performance-analytics
-- **Trade Logs**: http://localhost:4028/trade-logs
-- **Bot Configuration**: http://localhost:4028/bot-config
-- **Risk Rules**: http://localhost:4028/risk-rules
-- **Settings**: http://localhost:4028/settings
+- **Main Dashboard**: http://sniperbot.space:4028
+- **Performance Analytics**: http://sniperbot.space:4028/performance-analytics
+- **Trade Logs**: http://sniperbot.space:4028/trade-logs
+- **Bot Configuration**: http://sniperbot.space:4028/bot-config
+- **Risk Rules**: http://sniperbot.space:4028/risk-rules
+- **Settings**: http://sniperbot.space:4028/settings
 
 ### Logging
 

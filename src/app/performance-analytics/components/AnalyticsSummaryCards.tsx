@@ -12,6 +12,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
+import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 
 // Bybit API endpoints
 const BYBIT_API = {

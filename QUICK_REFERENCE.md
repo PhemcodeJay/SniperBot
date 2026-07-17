@@ -19,7 +19,7 @@ npm install
 ### 3. Start
 ```bash
 npm run dev
-# Open http://localhost:4028
+# Open http://sniperbot.space:4028
 ```
 
 ## 📊 Dashboard Features
@@ -65,7 +65,7 @@ npm run dev
 
 ```bash
 # Development
-npm run dev              # Start dev server (port 4028)
+npm run dev              # Start dev server on sniperbot.space:4028
 
 # Production
 npm run build           # Build for production

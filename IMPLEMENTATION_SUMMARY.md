@@ -92,7 +92,7 @@ npm run lint
 ### 4. Start Development
 ```bash
 npm run dev
-# Open http://localhost:4028
+# Open http://sniperbot.space:4028
 ```
 
 ### 5. Build for Production
@@ -194,7 +194,7 @@ startup.bat   # Windows
 
 ## 📊 Monitoring Dashboard
 
-Access the bot dashboard at `http://localhost:4028`
+197:Access the bot dashboard at `http://sniperbot.space:4028`
 
 ### Available Pages
 - **Dashboard** (`/`) - Main trading interface

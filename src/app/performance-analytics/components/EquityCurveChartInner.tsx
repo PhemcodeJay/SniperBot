@@ -14,6 +14,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { Loader2, AlertCircle } from 'lucide-react';
+import { formatUsd } from '@/lib/formatters';
 
 interface EquityPoint {
   date: string;
@@ -75,10 +76,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     <div className="card-surface p-3 shadow-xl text-xs font-mono min-w-[160px]">
       <p className="text-muted-foreground mb-2 font-sans">{label}</p>
       <p className="text-foreground">
-        Equity: <span className="text-primary">${d.equity.toLocaleString()}</span>
+        Equity: <span className="text-primary">{formatUsd(d.equity)}</span>
       </p>
       <p className={pnl >= 0 ? 'text-positive' : 'text-negative'}>
-        Net P&L: {pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}
+        Net P&L: {pnl >= 0 ? '+' : ''}{formatUsd(pnl, '---', true)}
       </p>
       {d.drawdown < 0 && (
         <p className="text-negative">DD: {d.drawdown.toFixed(2)}%</p>
@@ -339,16 +340,16 @@ export default function EquityCurveChartInner() {
       <div className="mt-3 pt-3 border-t border-border">
         <div className="flex justify-between text-[10px] text-muted-foreground">
           <span>
-            Start Equity: <span className="text-foreground font-mono">${stats.startEquity.toLocaleString()}</span>
+            Start Equity: <span className="text-foreground font-mono">{formatUsd(stats.startEquity)}</span>
           </span>
           <span>
-            Current: <span className="text-foreground font-mono">${stats.currentEquity.toLocaleString()}</span>
+            Current: <span className="text-foreground font-mono">{formatUsd(stats.currentEquity)}</span>
           </span>
           <span>
             Max DD: <span className="text-negative font-mono">{stats.maxDrawdown.toFixed(1)}%</span>
           </span>
           <span>
-            Peak: <span className="text-foreground font-mono">${stats.peakEquity.toLocaleString()}</span>
+            Peak: <span className="text-foreground font-mono">{formatUsd(stats.peakEquity)}</span>
           </span>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">

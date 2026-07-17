@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Bell, Wifi, Loader2, Shield, AlertCircle } from 'lucide-react';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
+import { formatUsd } from '@/lib/formatters';
 
 interface HeaderData {
   status: 'connected' | 'disconnected' | 'connecting' | 'authenticated';
@@ -67,13 +68,7 @@ export default function DashboardHeader() {
   };
 
   const formatBalance = (balance?: number) => {
-    if (!balance || balance === 0) return '---';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(balance);
+    return formatUsd(balance, '---');
   };
 
   const statusColor = {

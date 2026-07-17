@@ -312,7 +312,7 @@ export default function TradeLogsPage() {
       const merged = [...state.trades.paper, ...state.trades.live];
       setTrades(merged as any);
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -968,7 +968,7 @@ export default function TradeLogsPage() {
               <tbody>
                 {filtered.map((trade, i) => (
                   <tr
-                    key={trade.id}
+                    key={`${trade.id}-${trade.entryTimestamp ?? trade.entryTime}-${trade.exitTimestamp ?? 'open'}-${i}`}
                     className={`border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${
                       i % 2 === 0 ? '' : 'bg-gray-50/50 dark:bg-gray-800/30'
                     }`}

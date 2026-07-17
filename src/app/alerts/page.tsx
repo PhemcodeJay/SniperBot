@@ -132,7 +132,7 @@ export default function AlertsPage() {
     const unsubscribe = subscribeToSharedTradingState((state) => {
       setAlerts(state.alerts);
     });
-    return unsubscribe;
+    return () => unsubscribe();
   }, []);
 
   // Generate alert from market data

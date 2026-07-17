@@ -81,12 +81,12 @@ echo.
 
 REM Start production server
 echo 🎬 Starting production server on port 4028...
-echo 📊 Access dashboard at http://localhost:4028
+echo 📊 Access dashboard at http://sniperbot.space:4028
 echo.
 echo ⚠️  WARNING: MAINNET TRADING ENABLED
 echo    Real funds are at risk. Monitor trading carefully.
 echo.
 
-call npm run serve
+call npm run serve -- -H 127.0.0.1 -p 4028
 
 pause

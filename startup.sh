@@ -1,65 +1,93 @@
 #!/bin/bash
-# startup.sh - Production startup script for SniperBot
+cd ~/SniperBot
 
-set -e
+echo "================================================"
+echo "🔧 Setting up SSL for sniperbot.space"
+echo "================================================"
 
-echo "🚀 Starting SniperBot (MAINNET)..."
-
-# Check if .env.local exists
-if [ ! -f .env.local ]; then
-    echo "❌ ERROR: .env.local not found!"
-    echo "Please create .env.local with your Bybit API credentials"
-    exit 1
-fi
-
-# Check if credentials are present
-if ! grep -q "BYBIT_API_KEY=" .env.local; then
-    echo "❌ ERROR: BYBIT_API_KEY not configured in .env.local"
-    exit 1
-fi
-
-if ! grep -q "BYBIT_API_SECRET=" .env.local; then
-    echo "❌ ERROR: BYBIT_API_SECRET not configured in .env.local"
-    exit 1
-fi
-
-# Verify not in testnet
-if grep -q "BYBIT_USE_TESTNET=true" .env.local; then
-    echo "❌ ERROR: Testnet mode detected! This is MAINNET ONLY bot."
-    echo "Set BYBIT_USE_TESTNET=false in .env.local"
-    exit 1
-fi
-
-echo "✅ Configuration verified"
-
-# Install dependencies if needed
-if [ ! -d "node_modules" ]; then
-    echo "📦 Installing dependencies..."
-    npm install
-fi
-
-# Type check
-echo "🔍 Running type checks..."
-npm run type-check
-
-# Build
-echo "🏗️ Building application..."
-npm run build
-
-# Check for build errors
-if [ ! -d ".next" ]; then
-    echo "❌ Build failed!"
-    exit 1
-fi
-
-echo "✅ Build successful"
-
-# Start production server
-echo "🎬 Starting production server on port 4028..."
-echo "📊 Access dashboard at http://localhost:4028"
 echo ""
-echo "⚠️  WARNING: MAINNET TRADING ENABLED"
-echo "   Real funds are at risk. Monitor trading carefully."
-echo ""
+echo "1️⃣ Copying certificates..."
+sudo mkdir -p /etc/ssl/cloudflare
+sudo cp cert.pem /etc/ssl/cloudflare/
+sudo cp cert.key /etc/ssl/cloudflare/
+sudo chmod 644 /etc/ssl/cloudflare/cert.pem
+sudo chmod 600 /etc/ssl/cloudflare/cert.key
+echo "✅ Certificates copied"
 
-npm run serve
+echo ""
+echo "2️⃣ Creating Nginx config..."
+sudo tee /etc/nginx/sites-available/sniperbot.space >/dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name sniperbot.space www.sniperbot.space;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name sniperbot.space www.sniperbot.space;
+
+    ssl_certificate /etc/ssl/cloudflare/cert.pem;
+    ssl_certificate_key /etc/ssl/cloudflare/cert.key;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:4028;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+echo "✅ Nginx config created"
+
+echo ""
+echo "3️⃣ Enabling site..."
+sudo ln -sf /etc/nginx/sites-available/sniperbot.space /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+
+echo ""
+echo "4️⃣ Testing Nginx..."
+if sudo nginx -t; then
+    sudo systemctl reload nginx
+    echo "✅ Nginx reloaded!"
+else
+    echo "❌ Nginx test failed!"
+    exit 1
+fi
+
+echo ""
+echo "5️⃣ Checking services..."
+echo "Nginx on port 443:"
+sudo netstat -tlnp | grep :443
+echo ""
+echo "App on port 4028:"
+sudo netstat -tlnp | grep :4028
+
+echo ""
+echo "6️⃣ Testing access..."
+echo "HTTP (should redirect to HTTPS):"
+curl -s -o /dev/null -w "Status: %{http_code}\n" http://sniperbot.space
+echo "HTTPS:"
+curl -k -s -o /dev/null -w "Status: %{http_code}\n" https://sniperbot.space
+
+echo ""
+echo "================================================"
+echo "✅ Setup complete!"
+echo "🌐 Visit: https://sniperbot.space"
+echo ""
+echo "⚠️ In Cloudflare Dashboard:"
+echo "   SSL/TLS → Overview → Set to 'Full' (since you have certs)"
+echo "================================================"

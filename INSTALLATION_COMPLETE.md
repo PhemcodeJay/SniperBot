@@ -118,7 +118,7 @@ npm run lint
 ### Step 4: Start Development
 ```bash
 npm run dev
-# Open http://localhost:4028
+# Open http://sniperbot.space:4028
 ```
 
 ### Step 5: Build for Production
@@ -231,7 +231,7 @@ Scripts/
 ### 3. **Test Locally** (10 min)
    ```bash
    npm run dev
-   # Open http://localhost:4028
+   # Open http://sniperbot.space:4028
    # Verify dashboard loads and positions sync
    ```
 
@@ -310,7 +310,7 @@ Your SniperBot is now:
 - ✅ Well-documented (4 comprehensive guides)
 - ✅ Ready for mainnet trading
 
-**Start with**: `npm run dev` → http://localhost:4028
+**Start with**: `npm run dev` → http://sniperbot.space:4028
 
 ---
 
