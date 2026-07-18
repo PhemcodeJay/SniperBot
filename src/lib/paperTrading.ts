@@ -151,7 +151,9 @@ export function openPaperPosition(
   };
 
   state.positions.push(position);
-  state.balance -= requiredMargin;
+  // Deduct only the risk amount (SL distance * size), not full margin
+  const riskAmount = Math.abs(entryPrice - stopLoss) * size;
+  state.balance -= riskAmount;
   state.lastTradeTime = now;
   
   // Update peak balance
@@ -213,6 +215,10 @@ export function closePaperPosition(
   state.closedTrades.push(trade);
   state.totalPnl += trade.pnl;
   state.totalTrades++;
+  // Cap closed trades at 200 to prevent unbounded growth
+  if (state.closedTrades.length > 200) {
+    state.closedTrades = state.closedTrades.slice(-200);
+  }
   
   if (trade.pnl > 0) {
     state.wins++;

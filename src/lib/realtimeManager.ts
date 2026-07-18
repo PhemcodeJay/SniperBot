@@ -117,6 +117,18 @@ class RealtimeManager {
         this.wsHeartbeat = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op: 'ping' }));
         }, 30000);
+        // Subscribe to ticker topics for supported symbols
+        const symbols = [
+          'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+          'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
+          'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
+        ];
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({
+            op: 'subscribe',
+            args: symbols.map(s => `tickers.${s}`),
+          }));
+        }
       };
       this.ws.onmessage = (ev) => {
         try {

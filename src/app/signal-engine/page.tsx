@@ -254,13 +254,15 @@ export default function SignalEnginePage() {
 
     if (!isLong && !isShort) return null;
 
-    // Calculate confidence
+    // Calculate confidence (0-100 scale, proper distribution)
     const volumeFactor = Math.min(volume / 100000000, 2);
     const trendStrength = Math.abs(change24h) / 2;
     const rsiFactor = isLong ? (70 - indicators.rsi) / 70 : (indicators.rsi - 30) / 70;
+    const bbFactor = indicators.bb.position === 'upper' || indicators.bb.position === 'lower' ? 10 : 0;
+    const macdFactor = indicators.macd.signal !== 'neutral' ? 10 : 0;
     
-    let confidence = 50 + (trendStrength * 10) + (volumeFactor * 8) + (rsiFactor * 15);
-    confidence = Math.min(95, Math.max(55, confidence));
+    let confidence = 35 + (trendStrength * 8) + (volumeFactor * 8) + (rsiFactor * 12) + bbFactor + macdFactor;
+    confidence = Math.min(98, Math.max(20, confidence));
 
     // Calculate stop loss and take profit levels
     const atr = (high24h - low24h) / 4;

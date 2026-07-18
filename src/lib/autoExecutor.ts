@@ -277,7 +277,7 @@ class AutoExecutor {
         signalId: signal.id,
         symbol: signal.symbol,
         direction: signal.direction,
-        confidence: signal.confidence,
+        confidence: `${(signal.confidence * 100).toFixed(0)}%`,
         price: currentPrice,
       });
 
@@ -383,7 +383,7 @@ class AutoExecutor {
             exitTimestamp: 0,
             status: 'open',
             leverage,
-            liquidationPrice: 0,
+            liquidationPrice: leverage > 0 ? currentPrice * (1 - 1/leverage) : 0,
             orderId: orderResult.orderId,
             source: 'live',
             highestPrice: currentPrice,
