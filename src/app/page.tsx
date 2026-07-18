@@ -10,6 +10,7 @@ import { formatUsd } from '@/lib/formatters';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 import { appendSharedAlert, calculateLivePnl, getSharedTradingState, setSharedBalance, setSharedBotState, setSharedMetrics, setSharedSignals, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
 import { getPaperState, openPaperPosition, closePaperPosition as closePaperPos, resetPaperState, updatePaperPositions, PaperPosition } from '@/lib/paperTrading';
+import { autoExecutor } from '@/lib/autoExecutor';
 import { 
   TrendingUp, TrendingDown, DollarSign, Activity, 
   Zap, Wifi, WifiOff, RefreshCw, AlertCircle,
@@ -932,7 +933,13 @@ export default function Home() {
     setBotStatus(prev => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
     setBotStartTime(Date.now());
-    addAlert('system', 'medium', '🤖 Bot Started', 'Trading bot has been activated');
+    
+    // Start auto-executor in paper mode by default
+    autoExecutor.setMode('paper');
+    autoExecutor.setConfig({ enabled: true });
+    autoExecutor.start();
+    
+    addAlert('system', 'medium', '🤖 Bot Started', 'Trading bot has been activated in PAPER mode');
   };
 
   // Persist auto-trading setting and notify signal engine when bot starts
@@ -957,6 +964,10 @@ export default function Home() {
     setBotStatus(prev => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
     setBotStartTime(null);
+    
+    // Stop auto-executor
+    autoExecutor.stop();
+    
     addAlert('system', 'medium', '🛑 Bot Stopped', 'Trading bot has been deactivated');
   };
 
@@ -969,6 +980,9 @@ export default function Home() {
     };
     setBotStatus(prev => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
+
+    // Update auto-executor mode
+    autoExecutor.setMode(newMode);
 
     if (newMode === 'paper') {
       // Initialize paper state if not already done
@@ -1015,6 +1029,9 @@ export default function Home() {
     };
     setBotStatus(prev => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
+
+    // Update auto-executor enabled state
+    autoExecutor.setConfig({ enabled: nextValue });
 
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('auto_trading_enabled', String(nextValue));
