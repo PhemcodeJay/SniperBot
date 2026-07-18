@@ -177,16 +177,29 @@ export default function SignalEnginePage() {
     // Parse close prices
     const closes = klines.map((k: any) => parseFloat(k[4]));
 
-    // Calculate RSI
-    let gains = 0, losses = 0;
-    for (let i = 1; i < closes.length; i++) {
+    // Calculate RSI using Wilder's smoothed method (period=14)
+    const period = 14;
+    let avgGain = 0, avgLoss = 0;
+    // First average: simple mean of first 14 periods
+    for (let i = 1; i <= period && i < closes.length; i++) {
       const diff = closes[i] - closes[i - 1];
-      if (diff >= 0) gains += diff;
-      else losses += Math.abs(diff);
+      if (diff >= 0) avgGain += diff;
+      else avgLoss += Math.abs(diff);
     }
-    const avgGain = gains / closes.length;
-    const avgLoss = losses / closes.length;
-    const rs = avgLoss > 0 ? avgGain / avgLoss : 1;
+    avgGain /= period;
+    avgLoss /= period;
+    // Subsequent values: Wilder's smoothed (exponential) average
+    for (let i = period + 1; i < closes.length; i++) {
+      const diff = closes[i] - closes[i - 1];
+      if (diff >= 0) {
+        avgGain = (avgGain * (period - 1) + diff) / period;
+        avgLoss = (avgLoss * (period - 1)) / period;
+      } else {
+        avgGain = (avgGain * (period - 1)) / period;
+        avgLoss = (avgLoss * (period - 1) + Math.abs(diff)) / period;
+      }
+    }
+    const rs = avgLoss > 0 ? avgGain / avgLoss : 100;
     const rsi = 100 - (100 / (1 + rs));
 
     // Calculate MACD (simplified)
@@ -487,7 +500,7 @@ export default function SignalEnginePage() {
       }
 
       // Enforce global max concurrent live trades
-      const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '50', 50);
+      const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '10', 10);
       const currentLive = readLiveTrades().filter(t => t.status === 'open').length;
       if (currentLive >= MAX_CONCURRENT_LIVE) {
         throw new Error('Max concurrent live trades reached');

@@ -227,11 +227,13 @@ export function syncSharedTradingState(patch: Partial<SharedTradingState>): Shar
 
 export function setSharedTrades(source: 'paper' | 'live', trades: SharedTrade[]) {
   const state = getSharedTradingState();
+  // Cap trades at 200 to prevent localStorage from growing unbounded
+  const capped = trades.slice(0, 200);
   const next = {
     ...state,
     trades: {
       ...state.trades,
-      [source]: trades,
+      [source]: capped,
     },
     lastUpdated: Date.now(),
   };

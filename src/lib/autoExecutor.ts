@@ -9,6 +9,13 @@ import {
   getSharedTradingState,
 } from './tradingState';
 
+// Whitelist of supported symbols to prevent injection attacks
+const SUPPORTED_SYMBOLS = new Set([
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
+  'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
+]);
+
 interface ExecutionConfig {
   minConfidence: number;
   maxRiskPct: number;
@@ -22,10 +29,14 @@ class AutoExecutor {
   private executedSignals = new Set<string>();
 
   constructor() {
+    const rawMinConf = process.env.NEXT_PUBLIC_AUTO_EXECUTE_MIN_CONFIDENCE || process.env.AUTO_EXECUTE_MIN_CONFIDENCE || '';
+    const rawMaxRisk = process.env.NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT || process.env.AUTO_EXECUTE_MAX_RISK_PCT || '';
+    const rawEnabled = process.env.NEXT_PUBLIC_AUTO_EXECUTE || process.env.AUTO_EXECUTE_ENABLED || '';
+
     this.config = {
-      minConfidence: parseFloat(process.env.NEXT_PUBLIC_AUTO_EXECUTE_MIN_CONFIDENCE || process.env.AUTO_EXECUTE_MIN_CONFIDENCE || '0.80'),
-      maxRiskPct: parseFloat(process.env.NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT || process.env.AUTO_EXECUTE_MAX_RISK_PCT || '2.0'),
-      enabled: (process.env.NEXT_PUBLIC_AUTO_EXECUTE === 'true') || (process.env.AUTO_EXECUTE_ENABLED === 'true'),
+      minConfidence: rawMinConf ? parseFloat(rawMinConf) : 0.80,
+      maxRiskPct: rawMaxRisk ? parseFloat(rawMaxRisk) : 2.0,
+      enabled: ['true', '1', 'yes'].includes(rawEnabled.toLowerCase()),
     };
 
     logger.info('AutoExecutor', 'Initialized', this.config);
@@ -150,6 +161,11 @@ class AutoExecutor {
 
   private async executeSignal(signal: SharedSignal) {
     try {
+      // Validate symbol against whitelist to prevent injection attacks
+      if (!SUPPORTED_SYMBOLS.has(signal.symbol)) {
+        throw new Error(`Unsupported symbol: ${signal.symbol}. Must be one of: ${Array.from(SUPPORTED_SYMBOLS).join(', ')}`);
+      }
+
       logger.info('AutoExecutor', 'Executing high-confidence signal', {
         signalId: signal.id,
         symbol: signal.symbol,

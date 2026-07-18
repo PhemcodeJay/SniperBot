@@ -10,27 +10,36 @@ export interface BybitCredentials {
 }
 
 export function getBybitCredentials(): BybitCredentials {
-  const envApiKey = process.env.NEXT_PUBLIC_BYBIT_API_KEY || '';
-  const envApiSecret = process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '';
+  // NOTE: Never use NEXT_PUBLIC_ prefix for secrets - they get bundled into client JS.
+  // Server-side API calls should use process.env.BYBIT_API_KEY directly.
+  // Client-side credentials can be entered via the Settings UI (stored in localStorage)
+  // but this is NOT recommended for production. Use the server-side API proxy instead.
 
   if (typeof window === 'undefined') {
-    return { apiKey: envApiKey, apiSecret: envApiSecret, isTestnet: false };
+    // Server-side: use server-only env vars (not NEXT_PUBLIC_)
+    return {
+      apiKey: process.env.BYBIT_API_KEY || '',
+      apiSecret: process.env.BYBIT_API_SECRET || '',
+      isTestnet: false,
+    };
   }
 
+  // Client-side: only use credentials saved via Settings UI (localStorage)
+  // NEVER fall back to NEXT_PUBLIC_ env vars as they'd be in the JS bundle
   try {
     const saved = window.localStorage.getItem(BYBIT_CREDENTIALS_KEY);
     if (!saved) {
-      return { apiKey: envApiKey, apiSecret: envApiSecret, isTestnet: false };
+      return { apiKey: '', apiSecret: '', isTestnet: false };
     }
 
     const parsed = JSON.parse(saved);
     return {
-      apiKey: parsed?.apiKey || envApiKey,
-      apiSecret: parsed?.apiSecret || envApiSecret,
+      apiKey: parsed?.apiKey || '',
+      apiSecret: parsed?.apiSecret || '',
       isTestnet: Boolean(parsed?.isTestnet),
     };
   } catch {
-    return { apiKey: envApiKey, apiSecret: envApiSecret, isTestnet: false };
+    return { apiKey: '', apiSecret: '', isTestnet: false };
   }
 }
 
@@ -210,7 +219,7 @@ export async function placeBybitOrder(options: {
     };
   }
 
-  const orderBody = {
+  const orderBody: Record<string, string | number | undefined> = {
     category: 'linear',
     symbol,
     side: orderSide,

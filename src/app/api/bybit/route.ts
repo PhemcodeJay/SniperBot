@@ -15,10 +15,28 @@ import {
 const BYBIT_BASE_URL = 'https://api.bybit.com';
 const API_KEY = process.env.BYBIT_API_KEY || '';
 const API_SECRET = process.env.BYBIT_API_SECRET || '';
+const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || '';
 
 // Validate credentials exist
 if (!API_KEY || !API_SECRET) {
   logger.warn('Bybit API', 'Missing API credentials in environment variables');
+}
+
+// Simple bearer token check to prevent unauthenticated access to the API proxy
+function checkAuth(req: NextRequest): { authorized: boolean; reason?: string } {
+  // If no auth token is configured, allow all requests (backward compatible)
+  if (!API_AUTH_TOKEN) {
+    return { authorized: true };
+  }
+
+  const authHeader = req.headers.get('authorization') || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+  if (token !== API_AUTH_TOKEN) {
+    return { authorized: false, reason: 'Unauthorized: missing or invalid API token' };
+  }
+
+  return { authorized: true };
 }
 
 async function createBybitSignature(
@@ -94,6 +112,15 @@ async function ensureServerTimeSynced() {
 // ============== WALLET BALANCE ==============
 export async function POST(req: NextRequest) {
   try {
+    // Check authentication if API_AUTH_TOKEN is configured
+    const auth = checkAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { error: auth.reason },
+        { status: 401 }
+      );
+    }
+
     bybitPostCount++;
     try { (globalThis as any).bybitPostCount = bybitPostCount; } catch (_) {}
     logger.info('Bybit API', 'POST request count', { count: bybitPostCount });

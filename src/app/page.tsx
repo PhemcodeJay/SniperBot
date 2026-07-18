@@ -9,6 +9,7 @@ import { BYBIT_BASE_URL, getBybitCredentials, createBybitAuthHeaders, safeJsonPa
 import { formatUsd } from '@/lib/formatters';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
 import { appendSharedAlert, calculateLivePnl, getSharedTradingState, setSharedBalance, setSharedBotState, setSharedMetrics, setSharedSignals, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
+import { getPaperState, openPaperPosition, closePaperPosition as closePaperPos, resetPaperState, updatePaperPositions, PaperPosition } from '@/lib/paperTrading';
 import { 
   TrendingUp, TrendingDown, DollarSign, Activity, 
   Zap, Wifi, WifiOff, RefreshCw, AlertCircle,
@@ -763,20 +764,73 @@ export default function Home() {
     // noop: realtimeManager controls WS lifecycle
   }, []);
 
-  // Execute trade
+  // Execute trade (handles both paper and live mode)
   const executeTrade = async (symbol: string, side: 'LONG' | 'SHORT', size: number, leverage: number) => {
     try {
       setIsExecuting(true);
       setError(null);
 
-      const result = await executeTradeOnBybit(symbol, side, size, leverage);
-      
-      if (result.success) {
-        addAlert('trade', 'high', `✅ ${side} ${symbol}`, `Position opened at market price with ${leverage}x leverage`, symbol);
-        await fetchAllData();
+      if (botStatus.mode === 'paper') {
+        // Paper mode: simulate trade with live prices
+        const tickers = await fetchTickers([symbol]);
+        const ticker = tickers[symbol];
+        if (!ticker) {
+          setError('Could not fetch live price for paper trade');
+          return;
+        }
+        const entryPrice = parseFloat(ticker.lastPrice);
+        if (isNaN(entryPrice) || entryPrice <= 0) {
+          setError('Invalid live price for paper trade');
+          return;
+        }
+        const atr = (parseFloat(ticker.highPrice24h) - parseFloat(ticker.lowPrice24h)) / 4;
+        const stopLoss = side === 'LONG' ? entryPrice - atr * 1.5 : entryPrice + atr * 1.5;
+        const takeProfit = side === 'LONG' ? entryPrice + atr * 2.5 : entryPrice - atr * 2.5;
+
+        const result = openPaperPosition(symbol, side, entryPrice, size, leverage, stopLoss, takeProfit);
+        if (result.success) {
+          const paperState = getPaperState();
+          setPaperEquity(paperState.balance);
+          setPositions(paperState.positions.map(p => ({
+            id: p.id,
+            symbol: p.symbol,
+            side: p.side,
+            entryPrice: p.entryPrice,
+            currentPrice: p.currentPrice,
+            size: p.size,
+            pnl: p.pnl,
+            pnlPct: p.pnlPct,
+            entryTime: p.entryTime,
+            duration: p.duration,
+            leverage: p.leverage,
+            liquidationPrice: 0,
+            stopLoss: p.stopLoss,
+            takeProfit: p.takeProfit,
+          })));
+          setMetrics(prev => ({
+            ...prev,
+            totalBalance: paperState.balance,
+            availableBalance: paperState.balance,
+            equity: paperState.balance,
+            openPositions: paperState.positions.length,
+            totalPnl: paperState.totalPnl,
+            totalTrades: paperState.totalTrades,
+            winRate: paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
+          }));
+          addAlert('trade', 'high', `📄 ${side} ${symbol} (Paper)`, `Paper position opened at $${entryPrice.toFixed(2)} with ${leverage}x leverage`, symbol, entryPrice);
+        } else {
+          setError(`❌ Paper trade failed: ${result.error}`);
+        }
       } else {
-        setError(`❌ Order failed: ${result.error}`);
-        addAlert('system', 'medium', '❌ Trade Failed', `Failed to open ${side} ${symbol}: ${result.error}`, symbol);
+        // Live mode: execute real Bybit order
+        const result = await executeTradeOnBybit(symbol, side, size, leverage);
+        if (result.success) {
+          addAlert('trade', 'high', `✅ ${side} ${symbol}`, `Position opened at market price with ${leverage}x leverage`, symbol);
+          await fetchAllData();
+        } else {
+          setError(`❌ Order failed: ${result.error}`);
+          addAlert('system', 'medium', '❌ Trade Failed', `Failed to open ${side} ${symbol}: ${result.error}`, symbol);
+        }
       }
     } catch (err: any) {
       console.error('Error executing trade:', err);
@@ -786,16 +840,58 @@ export default function Home() {
     }
   };
 
-  // Close position
+  // Close position (handles both paper and live mode)
   const closePosition = async (position: Position) => {
     try {
-      const result = await closePositionOnBybit(position);
-      
-      if (result.success) {
-        await fetchAllData();
-        addAlert('trade', 'medium', `✅ Position Closed`, `Closed ${position.side} ${position.symbol}`, position.symbol);
+      if (botStatus.mode === 'paper') {
+        // Paper mode: close position at current live price
+        const tickers = await fetchTickers([position.symbol]);
+        const ticker = tickers[position.symbol];
+        const exitPrice = ticker ? parseFloat(ticker.lastPrice) : position.currentPrice;
+        
+        const result = closePaperPos(position.id, exitPrice, 'MANUAL');
+        if (result.success) {
+          const paperState = getPaperState();
+          setPaperEquity(paperState.balance);
+          setPositions(paperState.positions.map(p => ({
+            id: p.id,
+            symbol: p.symbol,
+            side: p.side,
+            entryPrice: p.entryPrice,
+            currentPrice: p.currentPrice,
+            size: p.size,
+            pnl: p.pnl,
+            pnlPct: p.pnlPct,
+            entryTime: p.entryTime,
+            duration: p.duration,
+            leverage: p.leverage,
+            liquidationPrice: 0,
+            stopLoss: p.stopLoss,
+            takeProfit: p.takeProfit,
+          })));
+          setMetrics(prev => ({
+            ...prev,
+            totalBalance: paperState.balance,
+            availableBalance: paperState.balance,
+            equity: paperState.balance,
+            openPositions: paperState.positions.length,
+            totalPnl: paperState.totalPnl,
+            totalTrades: paperState.totalTrades,
+            winRate: paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
+          }));
+          addAlert('trade', 'medium', `📄 Position Closed (Paper)`, `Closed ${position.side} ${position.symbol}`, position.symbol);
+        } else {
+          setError(`❌ Close failed: ${result.error}`);
+        }
       } else {
-        setError(`❌ Close failed: ${result.error}`);
+        // Live mode: close real Bybit position
+        const result = await closePositionOnBybit(position);
+        if (result.success) {
+          await fetchAllData();
+          addAlert('trade', 'medium', `✅ Position Closed`, `Closed ${position.side} ${position.symbol}`, position.symbol);
+        } else {
+          setError(`❌ Close failed: ${result.error}`);
+        }
       }
     } catch (err: any) {
       console.error('Error closing position:', err);
@@ -861,15 +957,49 @@ export default function Home() {
   };
 
   const handleToggleMode = () => {
-    // Force mode to 'live' only — paper mode removed from dashboard
+    const newMode = botStatus.mode === 'live' ? 'paper' : 'live';
     const nextBotState = {
-      mode: 'live',
-      lastAction: `Switched to live mode`,
+      mode: newMode as 'paper' | 'live',
+      lastAction: `Switched to ${newMode} mode`,
       lastActionTime: new Date().toLocaleTimeString(),
     };
     setBotStatus(prev => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
-    fetchAllData();
+
+    if (newMode === 'paper') {
+      // Initialize paper state if not already done
+      const paperState = getPaperState();
+      setPaperEquity(paperState.balance);
+      setMetrics(prev => ({
+        ...prev,
+        totalBalance: paperState.balance,
+        availableBalance: paperState.balance,
+        equity: paperState.balance,
+        totalPnl: paperState.totalPnl,
+        totalTrades: paperState.totalTrades,
+        winRate: paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
+        openPositions: paperState.positions.length,
+      }));
+      setPositions(paperState.positions.map(p => ({
+        id: p.id,
+        symbol: p.symbol,
+        side: p.side,
+        entryPrice: p.entryPrice,
+        currentPrice: p.currentPrice,
+        size: p.size,
+        pnl: p.pnl,
+        pnlPct: p.pnlPct,
+        entryTime: p.entryTime,
+        duration: p.duration,
+        leverage: p.leverage,
+        liquidationPrice: 0,
+        stopLoss: p.stopLoss,
+        takeProfit: p.takeProfit,
+      })));
+    } else {
+      fetchAllData();
+    }
+    addAlert('system', 'low', `🔄 Switched to ${newMode} mode`, `Trading mode changed to ${newMode}`);
   };
 
   const handleToggleAutoTrading = () => {

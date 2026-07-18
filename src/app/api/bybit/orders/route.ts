@@ -9,8 +9,25 @@ import { parseOrderResponse } from '@/lib/validators';
 const BYBIT_BASE_URL = 'https://api.bybit.com';
 const API_KEY = process.env.BYBIT_API_KEY || '';
 const API_SECRET = process.env.BYBIT_API_SECRET || '';
+const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || '';
 const MAX_POSITION_SIZE = parseFloat(process.env.MAX_POSITION_SIZE_USDT || '10000');
 const MAX_DAILY_LOSS_PCT = parseFloat(process.env.MAX_DAILY_LOSS_PCT || '5');
+
+// Simple bearer token check to prevent unauthenticated access to the order endpoint
+function checkAuth(req: NextRequest): { authorized: boolean; reason?: string } {
+  if (!API_AUTH_TOKEN) {
+    return { authorized: true };
+  }
+
+  const authHeader = req.headers.get('authorization') || '';
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+  if (token !== API_AUTH_TOKEN) {
+    return { authorized: false, reason: 'Unauthorized: missing or invalid API token' };
+  }
+
+  return { authorized: true };
+}
 
 interface ExecuteOrderRequest {
   symbol: string;
@@ -128,6 +145,15 @@ async function fetchInstrumentInfo(symbol: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Check authentication if API_AUTH_TOKEN is configured
+    const auth = checkAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { error: auth.reason },
+        { status: 401 }
+      );
+    }
+
     const body: ExecuteOrderRequest = await req.json();
 
     const {
