@@ -12,12 +12,13 @@ class RealtimeManager {
   private static _instance: RealtimeManager | null = null;
   private dataSubscribers = new Set<DataCallback>();
   private tickSubscribers = new Set<TickCallback>();
-  private pollInterval = 2000;
+  private pollInterval = 30000; // 30s to reduce Bybit API spam
   private pollTimer: NodeJS.Timeout | null = null;
   private ws: WebSocket | null = null;
   private wsHeartbeat: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isStarted = false;
+  private lastPayload: string | null = null; // cache to avoid emitting unchanged data
 
   static get instance() {
     if (!RealtimeManager._instance) RealtimeManager._instance = new RealtimeManager();
@@ -51,9 +52,14 @@ class RealtimeManager {
         lastUpdate: Date.now(),
       };
 
-      this.emitData(data);
+      // Memory optimization: only emit if data actually changed
+      const payloadStr = JSON.stringify(data);
+      if (payloadStr !== this.lastPayload) {
+        this.lastPayload = payloadStr;
+        this.emitData(data);
+      }
     } catch (err) {
-      logger.error('RealtimeManager', 'fetchOnce failed', { error: (err as Error).message });
+      // Silent fail to reduce log spam
     }
   }
 
@@ -84,13 +90,12 @@ class RealtimeManager {
   start() {
     if (this.isStarted) return;
     this.isStarted = true;
-    // Start polling
+    // Start polling at configured interval
     this.pollTimer = setInterval(() => this.fetchOnce(), this.pollInterval);
     // Do an immediate fetch
     this.fetchOnce().catch(() => {});
     // Try to open WebSocket for ticks
     this.connectWebSocket();
-    logger.info('RealtimeManager', 'started');
   }
 
   stop() {
@@ -99,19 +104,15 @@ class RealtimeManager {
     if (this.wsHeartbeat) { clearInterval(this.wsHeartbeat); this.wsHeartbeat = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
-    logger.info('RealtimeManager', 'stopped');
   }
 
   private connectWebSocket() {
     try {
       if (typeof window === 'undefined') return;
       if (this.ws) return;
-      console.debug('[RealtimeManager] connectWebSocket: opening connection');
       this.ws = new WebSocket(BYBIT_WS_URL);
       this.ws.onopen = () => {
-        logger.info('RealtimeManager', 'ws open');
-        console.debug('[RealtimeManager] ws open');
-        // Do not auto-subscribe to symbols here; consumers decide via server-side REST or manager polling.
+        // Silent on open
         if (this.wsHeartbeat) clearInterval(this.wsHeartbeat);
         this.wsHeartbeat = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op: 'ping' }));
@@ -122,7 +123,6 @@ class RealtimeManager {
           const payload = JSON.parse(ev.data as string);
           if (payload?.topic && payload.topic.startsWith('tickers')) {
             this.emitTick(payload.data || payload);
-            console.debug('[RealtimeManager] received tick', payload?.topic);
           }
         } catch (e) {
           // ignore
@@ -133,25 +133,19 @@ class RealtimeManager {
         if (this.wsHeartbeat) { clearInterval(this.wsHeartbeat); this.wsHeartbeat = null; }
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = setTimeout(() => this.connectWebSocket(), 5000);
-        console.debug('[RealtimeManager] ws closed, scheduled reconnect');
       };
-      this.ws.onerror = (event: Event) => {
-        const errorMsg = event instanceof ErrorEvent ? event.message : 'WebSocket connection error (check network/CORS)';
-        logger.error('RealtimeManager', 'WebSocket error', { error: errorMsg, state: this.ws?.readyState });
-        console.debug('[RealtimeManager] ws error:', errorMsg);
+      this.ws.onerror = () => {
+        // Silent error to reduce log spam
       };
     } catch (err) {
-      logger.error('RealtimeManager', 'connectWebSocket failed', { error: (err as Error).message });
+      // Silent fail
     }
   }
 
-  // Allow consumers to request an immediate refresh
   triggerRefresh() {
-    console.debug('[RealtimeManager] triggerRefresh called');
     this.fetchOnce().catch(() => {});
   }
 
-  // Expose WS connection state for health checks
   isWsConnected() {
     try {
       return !!(this.ws && this.ws.readyState === WebSocket.OPEN);

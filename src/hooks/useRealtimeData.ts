@@ -39,7 +39,7 @@ export interface UseRealtimeDataOptions {
   onError?: (error: Error) => void;
 }
 
-const DEFAULT_POLL_INTERVAL = 2000; // 2 seconds
+const DEFAULT_POLL_INTERVAL = 30000; // 30 seconds to reduce API spam and improve performance
 
 export function useRealtimeData(options: UseRealtimeDataOptions = {}) {
   const {

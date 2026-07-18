@@ -1,7 +1,8 @@
 // lib/paperTrading.ts
-// Paper trading engine - simulates trades using live prices without real Bybit orders
+// Paper trading engine - simulates trades using live prices with proper risk management
 
 const PAPER_STORAGE_KEY = 'sniperbot_paper_state';
+const MAX_TRADES = 200;
 
 export interface PaperPosition {
   id: string;
@@ -18,6 +19,10 @@ export interface PaperPosition {
   stopLoss: number;
   takeProfit: number;
   entryTimestamp: number;
+  highestPrice?: number;  // For trailing stops
+  lowestPrice?: number;   // For trailing stops
+  tp1Hit?: boolean;       // Partial profit taking
+  breakevenSet?: boolean; // Move SL to breakeven after TP1
 }
 
 export interface PaperTrade {
@@ -34,6 +39,7 @@ export interface PaperTrade {
   exitReason: string;
   leverage: number;
   confidence: number;
+  signalId?: string;
 }
 
 export interface PaperState {
@@ -45,6 +51,10 @@ export interface PaperState {
   totalTrades: number;
   wins: number;
   losses: number;
+  consecutiveLosses: number;
+  maxDrawdown: number;
+  peakBalance: number;
+  lastTradeTime: number;
 }
 
 const DEFAULT_PAPER_STATE: PaperState = {
@@ -56,6 +66,10 @@ const DEFAULT_PAPER_STATE: PaperState = {
   totalTrades: 0,
   wins: 0,
   losses: 0,
+  consecutiveLosses: 0,
+  maxDrawdown: 0,
+  peakBalance: 100,
+  lastTradeTime: 0,
 };
 
 export function getPaperState(): PaperState {
@@ -63,7 +77,8 @@ export function getPaperState(): PaperState {
   try {
     const saved = window.localStorage.getItem(PAPER_STORAGE_KEY);
     if (!saved) return { ...DEFAULT_PAPER_STATE };
-    return JSON.parse(saved);
+    const parsed = JSON.parse(saved);
+    return { ...DEFAULT_PAPER_STATE, ...parsed };
   } catch {
     return { ...DEFAULT_PAPER_STATE };
   }
@@ -88,14 +103,30 @@ export function openPaperPosition(
   size: number,
   leverage: number,
   stopLoss: number,
-  takeProfit: number
-): { success: boolean; error?: string } {
+  takeProfit: number,
+  confidence: number = 80
+): { success: boolean; error?: string; positionId?: string } {
   const state = getPaperState();
+  
+  // Risk checks
   const notional = size * entryPrice;
   const requiredMargin = notional / leverage;
-
-  if (requiredMargin > state.balance) {
-    return { success: false, error: 'Insufficient paper balance' };
+  
+  // Check if we have enough balance (use 80% max to leave room)
+  const maxAllowedMargin = state.balance * 0.8;
+  if (requiredMargin > maxAllowedMargin) {
+    return { success: false, error: `Insufficient paper balance. Required: $${requiredMargin.toFixed(2)}, Available: $${state.balance.toFixed(2)}` };
+  }
+  
+  // Check max positions (scalping: max 3 open positions)
+  if (state.positions.length >= 3) {
+    return { success: false, error: 'Maximum 3 open positions allowed for scalping' };
+  }
+  
+  // Check cooldown (minimum 30s between trades to overtrading)
+  const now = Date.now();
+  if (now - state.lastTradeTime < 30000) {
+    return { success: false, error: 'Trade cooldown: wait 30s between trades' };
   }
 
   const position: PaperPosition = {
@@ -113,32 +144,55 @@ export function openPaperPosition(
     stopLoss,
     takeProfit,
     entryTimestamp: Date.now(),
+    highestPrice: entryPrice,
+    lowestPrice: entryPrice,
+    tp1Hit: false,
+    breakevenSet: false,
   };
 
   state.positions.push(position);
   state.balance -= requiredMargin;
+  state.lastTradeTime = now;
+  
+  // Update peak balance
+  if (state.balance > state.peakBalance) {
+    state.peakBalance = state.balance;
+  }
+  
   savePaperState(state);
-  return { success: true };
+  return { success: true, positionId: position.id };
 }
 
 export function closePaperPosition(
   positionId: string,
   exitPrice: number,
-  exitReason: string = 'MANUAL'
-): { success: boolean; error?: string } {
+  exitReason: string = 'MANUAL',
+  closeSize?: number
+): { success: boolean; error?: string; pnl?: number } {
   const state = getPaperState();
   const idx = state.positions.findIndex(p => p.id === positionId);
   if (idx === -1) return { success: false, error: 'Position not found' };
 
   const pos = state.positions[idx];
+  const closeQty = closeSize || pos.size;
   const move = pos.side === 'LONG' ? exitPrice - pos.entryPrice : pos.entryPrice - exitPrice;
-  const pnl = move * pos.size;
-  const pnlPct = pos.entryPrice > 0 ? (pnl / (pos.entryPrice * Math.abs(pos.size))) * 100 : 0;
+  const pnl = move * closeQty;
+  const notional = closeQty * pos.entryPrice;
+  const pnlPct = notional > 0 ? (pnl / notional) * 100 : 0;
 
   // Return margin + PnL to balance
-  const notional = pos.size * pos.entryPrice;
-  const returnedMargin = notional / pos.leverage;
+  const marginRatio = closeQty / pos.size;
+  const returnedMargin = (notional / pos.leverage) * marginRatio;
   state.balance += returnedMargin + pnl;
+
+  // Track drawdown
+  if (state.balance > state.peakBalance) {
+    state.peakBalance = state.balance;
+  }
+  const drawdown = ((state.peakBalance - state.balance) / state.peakBalance) * 100;
+  if (drawdown > state.maxDrawdown) {
+    state.maxDrawdown = drawdown;
+  }
 
   const trade: PaperTrade = {
     id: `paper-trade-${pos.id}`,
@@ -146,7 +200,7 @@ export function closePaperPosition(
     side: pos.side,
     entryPrice: pos.entryPrice,
     exitPrice,
-    size: pos.size,
+    size: closeQty,
     pnl: Math.round(pnl * 100) / 100,
     pnlPct: Math.round(pnlPct * 10) / 10,
     entryTime: pos.entryTime,
@@ -157,14 +211,27 @@ export function closePaperPosition(
   };
 
   state.closedTrades.push(trade);
-  state.positions.splice(idx, 1);
   state.totalPnl += trade.pnl;
   state.totalTrades++;
-  if (trade.pnl > 0) state.wins++;
-  else if (trade.pnl < 0) state.losses++;
+  
+  if (trade.pnl > 0) {
+    state.wins++;
+    state.consecutiveLosses = 0;
+  } else if (trade.pnl < 0) {
+    state.losses++;
+    state.consecutiveLosses++;
+  }
+
+  // Remove position if fully closed
+  if (!closeSize || closeSize >= pos.size) {
+    state.positions.splice(idx, 1);
+  } else {
+    // Partial close - reduce position size
+    pos.size -= closeSize;
+  }
 
   savePaperState(state);
-  return { success: true };
+  return { success: true, pnl: trade.pnl };
 }
 
 export function updatePaperPositions(tickers: Record<string, any>): void {
@@ -172,36 +239,85 @@ export function updatePaperPositions(tickers: Record<string, any>): void {
   if (state.positions.length === 0) return;
 
   let changed = false;
+  const toClose: Array<{ pos: PaperPosition; reason: string; price: number }> = [];
+
   for (const pos of state.positions) {
     const ticker = tickers[pos.symbol];
     if (!ticker) continue;
 
     const currentPrice = parseFloat(ticker.lastPrice);
-    if (!isNaN(currentPrice) && currentPrice > 0) {
-      pos.currentPrice = currentPrice;
-      const move = pos.side === 'LONG' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
-      pos.pnl = Math.round(move * pos.size * 100) / 100;
-      pos.pnlPct = pos.entryPrice > 0 ? Math.round((pos.pnl / (pos.entryPrice * Math.abs(pos.size))) * 1000) / 10 : 0;
-      pos.duration = `${Math.floor((Date.now() - pos.entryTimestamp) / 60000)}m`;
-      changed = true;
+    if (!isFinite(currentPrice) || currentPrice <= 0) continue;
 
-      // Check stop loss
-      if (pos.side === 'LONG' && currentPrice <= pos.stopLoss) {
-        closePaperPosition(pos.id, pos.stopLoss, 'SL_HIT');
-        changed = true;
-      } else if (pos.side === 'SHORT' && currentPrice >= pos.stopLoss) {
-        closePaperPosition(pos.id, pos.stopLoss, 'SL_HIT');
-        changed = true;
+    pos.currentPrice = currentPrice;
+    const move = pos.side === 'LONG' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
+    pos.pnl = Math.round(move * pos.size * 100) / 100;
+    pos.pnlPct = pos.entryPrice > 0 ? Math.round((pos.pnl / (pos.entryPrice * Math.abs(pos.size))) * 1000) / 10 : 0;
+    pos.duration = `${Math.floor((Date.now() - pos.entryTimestamp) / 60000)}m`;
+    changed = true;
+
+    // Update highest/lowest for trailing stops
+    if (pos.side === 'LONG') {
+      if (!pos.highestPrice || currentPrice > pos.highestPrice) {
+        pos.highestPrice = currentPrice;
       }
-      // Check take profit
-      else if (pos.side === 'LONG' && currentPrice >= pos.takeProfit) {
-        closePaperPosition(pos.id, pos.takeProfit, 'TP_HIT');
-        changed = true;
-      } else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfit) {
-        closePaperPosition(pos.id, pos.takeProfit, 'TP_HIT');
+      // Trailing stop for long (1% below highest)
+      const trailingStop = pos.highestPrice * 0.99;
+      if (pos.breakevenSet && pos.stopLoss < trailingStop) {
+        pos.stopLoss = trailingStop;
+      }
+    } else {
+      if (!pos.lowestPrice || currentPrice < pos.lowestPrice) {
+        pos.lowestPrice = currentPrice;
+      }
+      // Trailing stop for short (1% above lowest)
+      const trailingStop = pos.lowestPrice * 1.01;
+      if (pos.breakevenSet && pos.stopLoss > trailingStop) {
+        pos.stopLoss = trailingStop;
+      }
+    }
+
+    // Check stop loss
+    if (pos.side === 'LONG' && currentPrice <= pos.stopLoss) {
+      toClose.push({ pos, reason: 'SL_HIT', price: pos.stopLoss });
+      continue;
+    } else if (pos.side === 'SHORT' && currentPrice >= pos.stopLoss) {
+      toClose.push({ pos, reason: 'SL_HIT', price: pos.stopLoss });
+      continue;
+    }
+
+    // Check take profit
+    if (pos.side === 'LONG' && currentPrice >= pos.takeProfit) {
+      toClose.push({ pos, reason: 'TP_HIT', price: pos.takeProfit });
+      continue;
+    } else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfit) {
+      toClose.push({ pos, reason: 'TP_HIT', price: pos.takeProfit });
+      continue;
+    }
+
+    // Partial TP at 50% of target (take profit halfway)
+    if (!pos.tp1Hit) {
+      const halfwayTP = pos.side === 'LONG'
+        ? pos.entryPrice + (pos.takeProfit - pos.entryPrice) * 0.5
+        : pos.entryPrice - (pos.entryPrice - pos.takeProfit) * 0.5;
+      
+      if ((pos.side === 'LONG' && currentPrice >= halfwayTP) || 
+          (pos.side === 'SHORT' && currentPrice <= halfwayTP)) {
+        // Take partial profit (50%)
+        const halfSize = pos.size * 0.5;
+        closePaperPosition(pos.id, currentPrice, 'TP1_PARTIAL', halfSize);
+        pos.tp1Hit = true;
+        pos.breakevenSet = true;
+        pos.size = halfSize;
+        // Move SL to breakeven
+        pos.stopLoss = pos.entryPrice;
         changed = true;
       }
     }
+  }
+
+  // Close positions that hit SL/TP
+  for (const { pos, reason, price } of toClose) {
+    closePaperPosition(pos.id, price, reason);
   }
 
   if (changed) {

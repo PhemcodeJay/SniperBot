@@ -262,6 +262,62 @@ export async function placeBybitOrder(options: {
   };
 }
 
+export async function closeBybitPosition(
+  symbol: string,
+  side: 'LONG' | 'SHORT',
+  size: number,
+  positionIdx?: number,
+  apiKey?: string,
+  apiSecret?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const credentials = apiKey && apiSecret
+      ? { apiKey, apiSecret, isTestnet: false }
+      : getBybitCredentials();
+
+    if (!credentials.apiKey || !credentials.apiSecret) {
+      return { success: false, error: 'Live trading credentials are not configured.' };
+    }
+
+    const recvWindow = '5000';
+    const closeSide = side === 'LONG' ? 'Sell' : 'Buy';
+    const params = `category=linear&symbol=${symbol}&side=${closeSide}&orderType=Market&qty=${size}&timeInForce=GTC&positionIdx=${positionIdx || 0}`;
+    const headers = await createBybitAuthHeaders(credentials.apiKey, credentials.apiSecret, params, recvWindow);
+
+    const response = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        category: 'linear',
+        symbol,
+        side: closeSide,
+        orderType: 'Market',
+        qty: size.toString(),
+        timeInForce: 'GTC',
+        positionIdx: positionIdx || 0,
+      }),
+    });
+
+    const data = await safeJsonParse(response);
+    if (data?.retCode !== 0) {
+      return {
+        success: false,
+        error: data?.retMsg || 'Bybit rejected the close order',
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to close position',
+    };
+  }
+}
+
 export async function safeJsonParse(response: Response) {
   try {
     const text = await response.text();

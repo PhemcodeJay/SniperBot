@@ -6,39 +6,24 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { realtimeManager } from '@/lib/realtimeManager';
 import { BYBIT_BASE_URL, fetchBybitWalletBalance, getBybitCredentials, normalizeBybitQty, placeBybitOrder, safeJsonParse } from '@/lib/bybit';
-import { appendSharedAlert, setSharedSignals, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
+import { appendSharedAlert, setSharedSignals, setSharedTrades, subscribeToSharedTradingState, SharedSignal } from '@/lib/tradingState';
 import { readLiveTrades, writeLiveTrades } from '@/lib/liveTrades';
+import { autoExecutor } from '@/lib/autoExecutor';
+import { getPaperState } from '@/lib/paperTrading';
 import { 
   Zap, TrendingUp, TrendingDown, RefreshCw, ChevronDown, ChevronUp,
   AlertCircle, CheckCircle, Clock, Filter, Search, X,
   Sparkles, Wifi, WifiOff, Database, Activity, Loader2
 } from 'lucide-react';
 
-interface Signal {
-  id: string;
-  symbol: string;
-  direction: 'LONG' | 'SHORT';
-  confidence: number;
-  entryPrice: number;
-  sl: number;
-  tp1: number;
-  tp2: number;
-  rr: number;
-  regime: string;
+interface Signal extends SharedSignal {
   volumeSpike: number;
   rsi: number;
   macdSignal: 'bullish' | 'bearish' | 'neutral';
   bbPosition: string;
-  timeframe: string;
-  status: 'live' | 'pending' | 'rejected' | 'executed';
-  rejectionReason?: string;
-  generatedAt: string;
-  timestamp: number;
-  volume: number;
-  signalSource: 'ml' | 'technical' | 'hybrid';
-  change24h: number;
   price24hHigh: number;
   price24hLow: number;
+  rejectionReason?: string;
 }
 
 interface Indicator {
@@ -61,7 +46,7 @@ const SUPPORTED_SYMBOLS = [
 // many times per second across 15 symbols; without a throttle every tick
 // would kick off a full market scan (15 ticker fetches + up to 15 kline
 // fetches), flooding Bybit's REST API and causing "Failed to fetch" errors.
-const MIN_RESCAN_INTERVAL_MS = 20000;
+const MIN_RESCAN_INTERVAL_MS = 30000; // 30s minimum between rescans to reduce API spam
 
 // ============== API HELPERS ==============
 const getApiCredentials = () => getBybitCredentials();
@@ -127,6 +112,8 @@ export default function SignalEnginePage() {
   const walletCacheRef = useRef<{ available: number; ts: number } | null>(null);
 
   const [signals, setSignals] = useState<Signal[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _localSignalsRef = useRef<Signal[]>([]);
   const [indicators] = useState<Indicator[]>([
     { id: 'rsi', label: 'RSI (14)', enabled: true, category: 'momentum' },
     { id: 'macd', label: 'MACD (12,26,9)', enabled: true, category: 'momentum' },
@@ -149,12 +136,15 @@ export default function SignalEnginePage() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [executingSignalId, setExecutingSignalId] = useState<string | null>(null);
   const [autoTradingEnabled, setAutoTradingEnabled] = useState(true);
+  const [consecutiveLosses, setConsecutiveLosses] = useState(0);
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedTradingState((state) => {
-      setSignals(state.signals);
+      setSignals(state.signals as Signal[]);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -332,13 +322,13 @@ export default function SignalEnginePage() {
 
       setSignals(prevSignals => {
         // Keep existing live/pending signals, add new ones
-        const existingActive = prevSignals.filter(s => s.status === 'live' || s.status === 'pending');
+      const existingActive = prevSignals.filter(s => s.status === 'live' || s.status === 'pending');
 
         // Combine and deduplicate by symbol
         const combined = [...newSignals, ...existingActive];
         const uniqueSignals = Array.from(
           new Map(combined.map(s => [s.symbol, s])).values()
-        ).sort((a, b) => b.confidence - a.confidence);
+        ).sort((a, b) => b.confidence - a.confidence) as Signal[];
 
         const merged = uniqueSignals.slice(0, 50);
         setSharedSignals(merged as any);
@@ -414,9 +404,9 @@ export default function SignalEnginePage() {
     window.addEventListener('bot-started', onBotStarted);
 
     const interval = setInterval(() => {
-      // rely on singleton manager; still fallback to periodic rescan
+      // rely on singleton manager; still fallback to periodic rescan at 30s
       fetchMarketDataAndGenerateSignals();
-    }, 120000);
+    }, 30000);
 
     return () => {
       clearInterval(interval);
@@ -438,38 +428,26 @@ export default function SignalEnginePage() {
     setStats({ live, pending, rejected, avgConfidence: avgConf });
   }, [signals]);
 
+  // Signal execution is now handled by autoExecutor
+  // This effect only updates UI state for auto-trading
   useEffect(() => {
-    if (!autoTradingEnabled) return;
-    const highConfidenceSignals = signals.filter(
-      (signal) => signal.status === 'live' && signal.confidence >= 80 && !autoExecutionRef.current.has(signal.id)
-    );
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('auto_trading_enabled', String(autoTradingEnabled));
+      window.dispatchEvent(new CustomEvent('auto-trading-settings-changed', { detail: { enabled: autoTradingEnabled } }));
+    }
+  }, [autoTradingEnabled]);
 
-    if (highConfidenceSignals.length === 0) return;
-
-    // Limit concurrent live trades to a maximum (default 10)
-    const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '10', 10);
-    const currentLiveCount = readLiveTrades().filter(t => t.status === 'open').length;
-    const availableSlots = Math.max(0, MAX_CONCURRENT_LIVE - currentLiveCount);
-    if (availableSlots <= 0) return;
-
-    // Serialize executions to avoid a burst of simultaneous POST requests.
-    (async () => {
-      const toExecute = highConfidenceSignals.slice(0, availableSlots);
-      for (const signal of toExecute) {
-        autoExecutionRef.current.add(signal.id);
-        try {
-          // Await to serialize the requests
-          // eslint-disable-next-line no-await-in-loop
-          await handleExecuteSignal(signal);
-        } catch (e) {
-          // swallow here since handleExecuteSignal handles errors
-        } finally {
-          autoExecutionRef.current.delete(signal.id);
-        }
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signals, autoTradingEnabled]);
+  // Update consecutive losses from paper state
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Using local getPaperState from paperTrading module
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { getPaperState: getLocalPaperState } = require('@/lib/paperTrading');
+      const paperState = getLocalPaperState();
+      setConsecutiveLosses(paperState.consecutiveLosses);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleRescan = async () => {
     setIsScanning(true);
@@ -649,7 +627,7 @@ export default function SignalEnginePage() {
       switch (sortBy) {
         case 'confidence': return b.confidence - a.confidence;
         case 'rr': return b.rr - a.rr;
-        case 'time': return b.timestamp - a.timestamp;
+        case 'time': return (b.timestamp || 0) - (a.timestamp || 0);
         default: return 0;
       }
     });

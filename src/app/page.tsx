@@ -413,6 +413,8 @@ export default function Home() {
     maxDrawdown: 0,
     riskExposure: 0,
   });
+  
+  const [consecutiveLosses, setConsecutiveLosses] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -464,7 +466,9 @@ export default function Home() {
       setBaseEquity(state.balance.baseEquity);
       setPaperEquity(state.balance.totalEquity);
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Sync real-time data from context
