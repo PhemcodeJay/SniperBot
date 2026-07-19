@@ -87,7 +87,7 @@ let bybitPostCount = 0;
 async function ensureServerTimeSynced() {
   const now = Date.now();
   // Refresh cache every 60s
-  if (serverTimeOffsetMs !== null && (now - serverTimeCachedAt) < 60000) return;
+  if (serverTimeOffsetMs !== null && now - serverTimeCachedAt < 60000) return;
 
   try {
     const resp = await fetch(`${BYBIT_BASE_URL}/v5/market/time`);
@@ -115,14 +115,13 @@ export async function POST(req: NextRequest) {
     // Check authentication if API_AUTH_TOKEN is configured
     const auth = checkAuth(req);
     if (!auth.authorized) {
-      return NextResponse.json(
-        { error: auth.reason },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: auth.reason }, { status: 401 });
     }
 
     bybitPostCount++;
-    try { (globalThis as any).bybitPostCount = bybitPostCount; } catch (_) {}
+    try {
+      (globalThis as any).bybitPostCount = bybitPostCount;
+    } catch (_) {}
     logger.info('Bybit API', 'POST request count', { count: bybitPostCount });
     let endpoint: string | null = null;
     let method = 'GET';
@@ -141,10 +140,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!endpoint) {
-      return NextResponse.json(
-        { error: 'Missing endpoint parameter' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing endpoint parameter' }, { status: 400 });
     }
 
     try {
@@ -159,13 +155,13 @@ export async function POST(req: NextRequest) {
         url += (endpoint.includes('?') ? '&' : '?') + queryParams;
         signature_payload = queryParams;
 
-      // For wallet-balance, Bybit requires accountType (e.g. UNIFIED)
+        // For wallet-balance, Bybit requires accountType (e.g. UNIFIED)
       } else if (endpoint.includes('wallet-balance')) {
         queryParams = 'accountType=UNIFIED';
         url += (endpoint.includes('?') ? '&' : '?') + queryParams;
         signature_payload = queryParams;
 
-      // For order realtime/history GET endpoints, ensure category is provided
+        // For order realtime/history GET endpoints, ensure category is provided
       } else if (endpoint.includes('/v5/order') && method === 'GET') {
         // For order endpoints queried via GET, include category and settleCoin when appropriate
         queryParams = 'category=linear';
@@ -174,35 +170,31 @@ export async function POST(req: NextRequest) {
         }
         url += (endpoint.includes('?') ? '&' : '?') + queryParams;
         signature_payload = queryParams;
-
       } else if (method === 'POST') {
         requestBody = body || {};
         signature_payload = JSON.stringify(requestBody);
       }
-      
+
       // Ensure server time offset is fresh before signing requests
       await ensureServerTimeSynced();
       const headers = await createBybitHeaders(signature_payload);
 
       logger.debug('Bybit API', `${method} ${endpoint}`, { payload: signature_payload });
 
-      const response = await requestManager.executeWithRateLimit(
-        url,
-        {
-          method,
-          headers,
-          ...(method === 'POST' && { body: signature_payload }),
-        }
-      );
+      const response = await requestManager.executeWithRateLimit<any>(url, {
+        method,
+        headers,
+        ...(method === 'POST' && { body: signature_payload }),
+      });
 
       logger.debug('Bybit API', 'Raw response', { response });
 
       // Check for API error response first
       if (response?.retCode !== 0 && response?.retCode !== undefined) {
-        logger.warn('Bybit API', 'API returned error', { 
-          retCode: response.retCode, 
+        logger.warn('Bybit API', 'API returned error', {
+          retCode: response.retCode,
           retMsg: response.retMsg,
-          endpoint 
+          endpoint,
         });
         // Return error response as-is for debugging
         return NextResponse.json(response, { status: 400 });
@@ -212,11 +204,11 @@ export async function POST(req: NextRequest) {
       if (endpoint.includes('wallet-balance')) {
         const result = parseWalletBalance(response);
         if (!result.success) {
-          logger.error('Bybit API', 'Invalid wallet balance response', { errors: result.error, response });
-          return NextResponse.json(
-            { error: 'Invalid API response format' },
-            { status: 500 }
-          );
+          logger.error('Bybit API', 'Invalid wallet balance response', {
+            errors: result.error,
+            response,
+          });
+          return NextResponse.json({ error: 'Invalid API response format' }, { status: 500 });
         }
         return NextResponse.json(result.data);
       }
@@ -224,11 +216,11 @@ export async function POST(req: NextRequest) {
       if (endpoint.includes('position/list')) {
         const result = parsePositionList(response);
         if (!result.success) {
-          logger.error('Bybit API', 'Invalid position list response', { errors: result.error, response });
-          return NextResponse.json(
-            { error: 'Invalid API response format' },
-            { status: 500 }
-          );
+          logger.error('Bybit API', 'Invalid position list response', {
+            errors: result.error,
+            response,
+          });
+          return NextResponse.json({ error: 'Invalid API response format' }, { status: 500 });
         }
         return NextResponse.json(result.data);
       }
@@ -237,10 +229,7 @@ export async function POST(req: NextRequest) {
         const result = parseOrderResponse(response);
         if (!result.success) {
           logger.error('Bybit API', 'Invalid order response', { errors: result.error, response });
-          return NextResponse.json(
-            { error: 'Invalid API response format' },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: 'Invalid API response format' }, { status: 500 });
         }
         return NextResponse.json(result.data);
       }
@@ -249,10 +238,7 @@ export async function POST(req: NextRequest) {
         const result = parseTickers(response);
         if (!result.success) {
           logger.error('Bybit API', 'Invalid tickers response', { errors: result.error, response });
-          return NextResponse.json(
-            { error: 'Invalid API response format' },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: 'Invalid API response format' }, { status: 500 });
         }
         return NextResponse.json(result.data);
       }
@@ -260,10 +246,7 @@ export async function POST(req: NextRequest) {
       if (endpoint.includes('market/time')) {
         const result = parseTimeResponse(response);
         if (!result.success) {
-          return NextResponse.json(
-            { error: 'Invalid API response format' },
-            { status: 500 }
-          );
+          return NextResponse.json({ error: 'Invalid API response format' }, { status: 500 });
         }
         return NextResponse.json(result.data);
       }
@@ -273,19 +256,13 @@ export async function POST(req: NextRequest) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       logger.error('Bybit API', `Failed to call ${endpoint}`, { error: message }, error as Error);
 
-      return NextResponse.json(
-        { error: message, endpoint },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: message, endpoint }, { status: 500 });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     logger.error('Bybit API', 'Request processing failed', { error: message }, error as Error);
 
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

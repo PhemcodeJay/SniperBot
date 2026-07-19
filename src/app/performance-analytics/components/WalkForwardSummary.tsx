@@ -53,22 +53,22 @@ const safeJsonParse = async (response: Response) => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -93,45 +93,47 @@ export default function WalkForwardSummary() {
       // Fetch real market data
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       const tickerList = Object.values(tickers);
-      
+
       if (tickerList.length === 0) {
         throw new Error('No market data available');
       }
-      
+
       // Calculate aggregate metrics from real data
       let totalVolume = 0;
       let totalChange = 0;
       let totalVolatility = 0;
       let validCount = 0;
-      
+
       tickerList.forEach((ticker: any) => {
         const volume = parseFloat(ticker.volume24h);
         const change = parseFloat(ticker.price24hPcnt) * 100;
         const high24h = parseFloat(ticker.highPrice24h);
         const low24h = parseFloat(ticker.lowPrice24h);
-        
+
         totalVolume += volume;
         totalChange += change;
-        totalVolatility += high24h > 0 && low24h > 0 
-          ? ((high24h - low24h) / low24h) * 100 
-          : Math.abs(change);
+        totalVolatility +=
+          high24h > 0 && low24h > 0 ? ((high24h - low24h) / low24h) * 100 : Math.abs(change);
         validCount++;
       });
-      
+
       const avgChange = validCount > 0 ? totalChange / validCount : 0;
       const avgVolatility = validCount > 0 ? totalVolatility / validCount : 0;
       const avgVolume = validCount > 0 ? totalVolume / validCount : 0;
-      
+
       // Calculate derived metrics
-      const tradeCount = Math.floor(avgVolume / 1000000 * 3) + 15;
-      const winRate = Math.min(90, Math.max(50, 60 + Math.abs(avgChange) * 1.5 + avgVolatility * 0.3));
+      const tradeCount = Math.floor((avgVolume / 1000000) * 3) + 15;
+      const winRate = Math.min(
+        90,
+        Math.max(50, 60 + Math.abs(avgChange) * 1.5 + avgVolatility * 0.3)
+      );
       const profitFactor = Math.max(1.0, 1.5 + Math.abs(avgChange) * 0.3 + avgVolatility * 0.05);
       const sharpe = Math.max(0.5, 1.5 + Math.abs(avgChange) * 0.2 + avgVolatility * 0.1);
-      
+
       // Calculate paper trading day progress (3-14 days)
       const day = Math.min(14, Math.max(1, Math.floor(3 + Math.abs(avgChange) * 0.5)));
       const progress = Math.round((day / 14) * 100);
-      
+
       const walkForwardData = {
         tradeCount,
         winRate,
@@ -140,9 +142,9 @@ export default function WalkForwardSummary() {
         day,
         totalDays: 14,
       };
-      
+
       setData(walkForwardData);
-      
+
       // Build phases with real data
       const phasesData: Phase[] = [
         {
@@ -191,54 +193,56 @@ export default function WalkForwardSummary() {
           note: 'Walk-forward parameter recalibration every 30 days',
         },
       ];
-      
+
       setPhases(phasesData);
-      
+
       // Build criteria with real data
       const criteriaData: Criteria[] = [
-        { 
-          id: 'crit-trades', 
-          label: 'Min 100 trades executed', 
-          met: tradeCount >= 100, 
-          current: `${tradeCount} / 100` 
+        {
+          id: 'crit-trades',
+          label: 'Min 100 trades executed',
+          met: tradeCount >= 100,
+          current: `${tradeCount} / 100`,
         },
-        { 
-          id: 'crit-winrate', 
-          label: 'Win rate > 60%', 
-          met: winRate > 60, 
-          current: `${Math.round(winRate)}%` 
+        {
+          id: 'crit-winrate',
+          label: 'Win rate > 60%',
+          met: winRate > 60,
+          current: `${Math.round(winRate)}%`,
         },
-        { 
-          id: 'crit-pf', 
-          label: 'Profit factor > 1.5', 
-          met: profitFactor > 1.5, 
-          current: profitFactor.toFixed(2) 
+        {
+          id: 'crit-pf',
+          label: 'Profit factor > 1.5',
+          met: profitFactor > 1.5,
+          current: profitFactor.toFixed(2),
         },
-        { 
-          id: 'crit-returns', 
-          label: 'Risk-adjusted returns positive', 
-          met: sharpe > 1.0, 
-          current: `Sharpe ${sharpe.toFixed(2)}` 
+        {
+          id: 'crit-returns',
+          label: 'Risk-adjusted returns positive',
+          met: sharpe > 1.0,
+          current: `Sharpe ${sharpe.toFixed(2)}`,
         },
-        { 
-          id: 'crit-data', 
-          label: 'Sufficient market data available', 
-          met: validCount >= 5, 
-          current: `${validCount} symbols` 
+        {
+          id: 'crit-data',
+          label: 'Sufficient market data available',
+          met: validCount >= 5,
+          current: `${validCount} symbols`,
         },
-        { 
-          id: 'crit-uptime', 
-          label: 'No critical system failures', 
-          met: true, 
-          current: 'Connected' 
+        {
+          id: 'crit-uptime',
+          label: 'No critical system failures',
+          met: true,
+          current: 'Connected',
         },
       ];
-      
+
       setCriteria(criteriaData);
       setError(null);
     } catch (error) {
       console.error('Failed to fetch walk-forward data:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load walk-forward analysis data');
+      setError(
+        error instanceof Error ? error.message : 'Failed to load walk-forward analysis data'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -285,9 +289,7 @@ export default function WalkForwardSummary() {
     <div className="card-surface p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            Go/No-Go Launch Criteria
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground">Go/No-Go Launch Criteria</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Paper trading phase · {metCount}/{totalCriteria} criteria met
           </p>
@@ -348,16 +350,16 @@ export default function WalkForwardSummary() {
                   className={`
                     w-5 h-5 rounded-full flex items-center justify-center shrink-0 border-2
                     ${
-                      phase.status === 'active' ? 'border-primary bg-primary/20' : 'border-border bg-muted'
+                      phase.status === 'active'
+                        ? 'border-primary bg-primary/20'
+                        : 'border-border bg-muted'
                     }
                   `}
                 >
                   {phase.status === 'active' ? (
                     <span className="w-2 h-2 rounded-full bg-primary" />
                   ) : (
-                    <span className="text-[8px] font-bold text-muted-foreground">
-                      {idx + 1}
-                    </span>
+                    <span className="text-[8px] font-bold text-muted-foreground">{idx + 1}</span>
                   )}
                 </div>
                 {idx < phases.length - 1 && (
@@ -400,15 +402,11 @@ export default function WalkForwardSummary() {
                         style={{ width: `${phase.progress}%` }}
                       />
                     </div>
-                    <span className="text-[10px] text-primary font-tabular">
-                      {phase.progress}%
-                    </span>
+                    <span className="text-[10px] text-primary font-tabular">{phase.progress}%</span>
                   </div>
                 )}
 
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  {phase.note}
-                </p>
+                <p className="text-[10px] text-muted-foreground mt-1">{phase.note}</p>
 
                 {phase.metrics && (
                   <div className="flex flex-wrap gap-3 mt-1.5">
@@ -429,12 +427,14 @@ export default function WalkForwardSummary() {
       {/* Data Source */}
       <div className="mt-3 pt-2 border-t border-border">
         <p className="text-[9px] text-muted-foreground">
-          <span className="text-muted-foreground">Data source:</span> Bybit real-time ticker data · 
+          <span className="text-muted-foreground">Data source:</span> Bybit real-time ticker data ·
           <span className="ml-1">{SUPPORTED_SYMBOLS.length} symbols analyzed</span>
         </p>
         {data && (
           <div className="flex gap-4 mt-1 text-[9px] text-muted-foreground">
-            <span>Day {data.day}/{data.totalDays}</span>
+            <span>
+              Day {data.day}/{data.totalDays}
+            </span>
             <span>Win Rate: {Math.round(data.winRate)}%</span>
             <span>Profit Factor: {data.profitFactor.toFixed(2)}</span>
           </div>

@@ -100,14 +100,19 @@ export interface BybitInstrumentInfo {
   qtyStep: number;
 }
 
-export async function fetchBybitInstrumentInfo(symbol: string): Promise<BybitInstrumentInfo | null> {
+export async function fetchBybitInstrumentInfo(
+  symbol: string
+): Promise<BybitInstrumentInfo | null> {
   try {
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/market/instruments-info?category=linear&symbol=${encodeURIComponent(symbol)}`);
+    const response = await fetch(
+      `${BYBIT_BASE_URL}/v5/market/instruments-info?category=linear&symbol=${encodeURIComponent(symbol)}`
+    );
     const data = await safeJsonParse(response);
     const info = data?.result?.list?.[0];
     if (!info) return null;
 
-    const lot = info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
+    const lot =
+      info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
     const minOrderQty = parseFloat(lot.minOrderQty || lot.min_qty || lot.min || '0') || 0;
     const qtyStep = parseFloat(lot.qtyStep || lot.stepSize || lot.qty_step || lot.step || '0') || 0;
 
@@ -143,9 +148,8 @@ export async function fetchBybitWalletBalance(
   apiKey?: string,
   apiSecret?: string
 ): Promise<BybitWalletBalance> {
-  const credentials = apiKey && apiSecret
-    ? { apiKey, apiSecret, isTestnet: false }
-    : getBybitCredentials();
+  const credentials =
+    apiKey && apiSecret ? { apiKey, apiSecret, isTestnet: false } : getBybitCredentials();
 
   if (!credentials.apiKey || !credentials.apiSecret) {
     return { totalEquity: 0, availableBalance: 0, walletBalance: 0 };
@@ -153,7 +157,12 @@ export async function fetchBybitWalletBalance(
 
   const recvWindow = '5000';
   const params = 'accountType=UNIFIED';
-  const headers = await createBybitAuthHeaders(credentials.apiKey, credentials.apiSecret, params, recvWindow);
+  const headers = await createBybitAuthHeaders(
+    credentials.apiKey,
+    credentials.apiSecret,
+    params,
+    recvWindow
+  );
 
   const response = await fetch(`${BYBIT_BASE_URL}/v5/account/wallet-balance?${params}`, {
     method: 'GET',
@@ -162,8 +171,12 @@ export async function fetchBybitWalletBalance(
 
   const data = await safeJsonParse(response);
   const wallet = data?.result?.list?.[0] || data?.result || {};
-  const totalEquity = parseFloat(wallet?.totalEquity ?? wallet?.equity ?? wallet?.walletBalance ?? '0');
-  const availableBalance = parseFloat(wallet?.availableBalance ?? wallet?.available ?? wallet?.walletBalance ?? '0');
+  const totalEquity = parseFloat(
+    wallet?.totalEquity ?? wallet?.equity ?? wallet?.walletBalance ?? '0'
+  );
+  const availableBalance = parseFloat(
+    wallet?.availableBalance ?? wallet?.available ?? wallet?.walletBalance ?? '0'
+  );
 
   return {
     totalEquity: Number.isFinite(totalEquity) ? totalEquity : 0,
@@ -184,9 +197,8 @@ export async function placeBybitOrder(options: {
   takeProfit?: number;
 }) {
   const { symbol, side, qty, leverage = 5, positionIdx, apiKey, apiSecret } = options;
-  const credentials = apiKey && apiSecret
-    ? { apiKey, apiSecret, isTestnet: false }
-    : getBybitCredentials();
+  const credentials =
+    apiKey && apiSecret ? { apiKey, apiSecret, isTestnet: false } : getBybitCredentials();
 
   if (!credentials.apiKey || !credentials.apiSecret) {
     throw new Error('Live trading credentials are not configured. Add them in Settings first.');
@@ -201,7 +213,12 @@ export async function placeBybitOrder(options: {
     buyLeverage: leverage.toString(),
     sellLeverage: leverage.toString(),
   };
-  const leverageHeaders = await createBybitAuthHeaders(credentials.apiKey, credentials.apiSecret, leverageBody, recvWindow);
+  const leverageHeaders = await createBybitAuthHeaders(
+    credentials.apiKey,
+    credentials.apiSecret,
+    leverageBody,
+    recvWindow
+  );
   await fetch(`${BYBIT_BASE_URL}/v5/position/set-leverage`, {
     method: 'POST',
     headers: {
@@ -230,15 +247,20 @@ export async function placeBybitOrder(options: {
     ...(typeof positionIdx === 'number' ? { positionIdx } : {}),
   };
   // Include TP/SL when provided
-  if (typeof (options.stopLoss) === 'number' && !isNaN(options.stopLoss)) {
+  if (typeof options.stopLoss === 'number' && !isNaN(options.stopLoss)) {
     orderBody.stopLoss = options.stopLoss.toString();
     orderBody.tpSlMode = 'Full';
   }
-  if (typeof (options.takeProfit) === 'number' && !isNaN(options.takeProfit)) {
+  if (typeof options.takeProfit === 'number' && !isNaN(options.takeProfit)) {
     orderBody.takeProfit = options.takeProfit.toString();
     orderBody.tpSlMode = 'Full';
   }
-  const orderHeaders = await createBybitAuthHeaders(credentials.apiKey, credentials.apiSecret, orderBody, recvWindow);
+  const orderHeaders = await createBybitAuthHeaders(
+    credentials.apiKey,
+    credentials.apiSecret,
+    orderBody,
+    recvWindow
+  );
   const orderResponse = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
     method: 'POST',
     headers: {
@@ -271,9 +293,8 @@ export async function closeBybitPosition(
   apiSecret?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const credentials = apiKey && apiSecret
-      ? { apiKey, apiSecret, isTestnet: false }
-      : getBybitCredentials();
+    const credentials =
+      apiKey && apiSecret ? { apiKey, apiSecret, isTestnet: false } : getBybitCredentials();
 
     if (!credentials.apiKey || !credentials.apiSecret) {
       return { success: false, error: 'Live trading credentials are not configured.' };
@@ -282,7 +303,12 @@ export async function closeBybitPosition(
     const recvWindow = '5000';
     const closeSide = side === 'LONG' ? 'Sell' : 'Buy';
     const params = `category=linear&symbol=${symbol}&side=${closeSide}&orderType=Market&qty=${size}&timeInForce=GTC&positionIdx=${positionIdx || 0}`;
-    const headers = await createBybitAuthHeaders(credentials.apiKey, credentials.apiSecret, params, recvWindow);
+    const headers = await createBybitAuthHeaders(
+      credentials.apiKey,
+      credentials.apiSecret,
+      params,
+      recvWindow
+    );
 
     const response = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
       method: 'POST',

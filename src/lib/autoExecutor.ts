@@ -9,15 +9,38 @@ import {
   getSharedTradingState,
   syncSharedTradingState,
 } from './tradingState';
-import { openPaperPosition, closePaperPosition, getPaperState, updatePaperPositions } from './paperTrading';
-import { addLiveTrade, updateLiveTrade, closeLiveTrade, getOpenLiveTrades, type LiveTradeRecord } from './liveTrades';
+import {
+  openPaperPosition,
+  closePaperPosition,
+  getPaperState,
+  updatePaperPositions,
+} from './paperTrading';
+import {
+  addLiveTrade,
+  updateLiveTrade,
+  closeLiveTrade,
+  getOpenLiveTrades,
+  type LiveTradeRecord,
+} from './liveTrades';
 import { placeBybitOrder, BYBIT_BASE_URL } from './bybit';
 
 // Whitelist of supported symbols to prevent injection attacks
 const SUPPORTED_SYMBOLS = new Set([
-  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
-  'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'DOGEUSDT',
+  'ADAUSDT',
+  'AVAXUSDT',
+  'LINKUSDT',
+  'DOTUSDT',
+  'MATICUSDT',
+  'LTCUSDT',
+  'NEARUSDT',
+  'APTUSDT',
+  'ARBUSDT',
 ]);
 
 interface ExecutionConfig {
@@ -37,11 +60,19 @@ class AutoExecutor {
   private lossCooldownUntil = 0;
 
   constructor() {
-    const rawMinConf = process.env.NEXT_PUBLIC_AUTO_EXECUTE_MIN_CONFIDENCE || process.env.AUTO_EXECUTE_MIN_CONFIDENCE || '';
-    const rawMaxRisk = process.env.NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT || process.env.AUTO_EXECUTE_MAX_RISK_PCT || '';
-    const rawEnabled = process.env.NEXT_PUBLIC_AUTO_EXECUTE || process.env.AUTO_EXECUTE_ENABLED || '';
+    const rawMinConf =
+      process.env.NEXT_PUBLIC_AUTO_EXECUTE_MIN_CONFIDENCE ||
+      process.env.AUTO_EXECUTE_MIN_CONFIDENCE ||
+      '';
+    const rawMaxRisk =
+      process.env.NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT ||
+      process.env.AUTO_EXECUTE_MAX_RISK_PCT ||
+      '';
+    const rawEnabled =
+      process.env.NEXT_PUBLIC_AUTO_EXECUTE || process.env.AUTO_EXECUTE_ENABLED || '';
     const rawMode = process.env.NEXT_PUBLIC_TRADING_MODE || process.env.TRADING_MODE || 'paper';
-    const rawLeverage = process.env.NEXT_PUBLIC_DEFAULT_LEVERAGE || process.env.DEFAULT_LEVERAGE || '5';
+    const rawLeverage =
+      process.env.NEXT_PUBLIC_DEFAULT_LEVERAGE || process.env.DEFAULT_LEVERAGE || '5';
 
     this.config = {
       minConfidence: rawMinConf ? parseFloat(rawMinConf) : 0.75,
@@ -64,7 +95,11 @@ class AutoExecutor {
 
     this.isRunning = true;
     // Faster interval for scalping - 500ms
-    const intervalMs = parseInt(process.env.NEXT_PUBLIC_SIGNAL_CHECK_INTERVAL_MS || process.env.SIGNAL_CHECK_INTERVAL_MS || '500');
+    const intervalMs = parseInt(
+      process.env.NEXT_PUBLIC_SIGNAL_CHECK_INTERVAL_MS ||
+        process.env.SIGNAL_CHECK_INTERVAL_MS ||
+        '500'
+    );
 
     logger.info('AutoExecutor', 'Started signal monitoring', { intervalMs, config: this.config });
 
@@ -109,7 +144,7 @@ class AutoExecutor {
 
     try {
       const state = getSharedTradingState();
-      
+
       // Get pending signals
       const pendingSignals = state.signals.filter(
         (sig: SharedSignal) => sig.status === 'pending' && !this.executedSignals.has(sig.id)
@@ -170,22 +205,22 @@ class AutoExecutor {
   private async fetchTickers(): Promise<Record<string, any> | null> {
     try {
       const symbols = Array.from(SUPPORTED_SYMBOLS);
-      const promises = symbols.map(symbol =>
+      const promises = symbols.map((symbol) =>
         fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-          .then(r => r.json())
+          .then((r) => r.json())
           .catch(() => null)
       );
-      
+
       const results = await Promise.all(promises);
       const tickers: Record<string, any> = {};
-      
+
       results.forEach((data: any) => {
         if (data?.retCode === 0 && data?.result?.list?.[0]) {
           const ticker = data.result.list[0];
           tickers[ticker.symbol] = ticker;
         }
       });
-      
+
       return tickers;
     } catch (error) {
       logger.error('AutoExecutor', 'Failed to fetch tickers', { error });
@@ -207,7 +242,8 @@ class AutoExecutor {
 
     // Check daily loss
     const dailyLossPct = state.metrics.dailyPnlPct || 0;
-    if (dailyLossPct < -3) { // 3% daily loss limit
+    if (dailyLossPct < -3) {
+      // 3% daily loss limit
       return {
         allowed: false,
         reason: `Daily loss limit (-3%) reached: ${dailyLossPct.toFixed(2)}%`,
@@ -246,7 +282,9 @@ class AutoExecutor {
       // Validate signal freshness (skip signals older than 2s for scalping)
       const signalAge = Date.now() - (signal.timestamp || Date.now());
       if (signalAge > 2000) {
-        logger.debug('AutoExecutor', `Skipping stale signal (${signalAge}ms old)`, { signalId: signal.id });
+        logger.debug('AutoExecutor', `Skipping stale signal (${signalAge}ms old)`, {
+          signalId: signal.id,
+        });
         return;
       }
 
@@ -324,7 +362,7 @@ class AutoExecutor {
 
         if (result.success) {
           this.executedSignals.add(signal.id);
-          
+
           appendSharedAlert({
             id: `alert-${Date.now()}`,
             type: 'trade',
@@ -383,7 +421,7 @@ class AutoExecutor {
             exitTimestamp: 0,
             status: 'open',
             leverage,
-            liquidationPrice: leverage > 0 ? currentPrice * (1 - 1/leverage) : 0,
+            liquidationPrice: leverage > 0 ? currentPrice * (1 - 1 / leverage) : 0,
             orderId: orderResult.orderId,
             source: 'live',
             highestPrice: currentPrice,
@@ -420,10 +458,15 @@ class AutoExecutor {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
-      logger.error('AutoExecutor', 'Failed to execute signal', {
-        signalId: signal.id,
-        error: message,
-      }, error as Error);
+      logger.error(
+        'AutoExecutor',
+        'Failed to execute signal',
+        {
+          signalId: signal.id,
+          error: message,
+        },
+        error as Error
+      );
 
       // Create error alert
       appendSharedAlert({
@@ -445,12 +488,14 @@ class AutoExecutor {
       const url = `${BYBIT_BASE_URL}/v5/market/instruments-info?category=linear&symbol=${encodeURIComponent(symbol)}`;
       const resp = await fetch(url);
       const data = await resp.json();
-      
+
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const info = data.result.list[0];
-        const lot = info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
+        const lot =
+          info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
         const minOrderQty = parseFloat(lot.minOrderQty || lot.min_qty || lot.min || '0') || 0;
-        const qtyStep = parseFloat(lot.qtyStep || lot.stepSize || lot.qty_step || lot.step || '0') || 0;
+        const qtyStep =
+          parseFloat(lot.qtyStep || lot.stepSize || lot.qty_step || lot.step || '0') || 0;
 
         let normalizedQty = qty;
 

@@ -5,13 +5,34 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { realtimeManager } from '@/lib/realtimeManager';
 import AppLayout from '@/components/AppLayout';
-import { 
-  Settings, ExternalLink, Save, Key, Shield, 
-  Wifi, WifiOff, RefreshCw, CheckCircle, XCircle,
-  AlertCircle, Eye, EyeOff, Copy, Check,
-  Network, Database, Activity, Server, Loader2
+import {
+  Settings,
+  ExternalLink,
+  Save,
+  Key,
+  Shield,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
+  Network,
+  Database,
+  Activity,
+  Server,
+  Loader2,
 } from 'lucide-react';
-import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import {
+  BYBIT_BASE_URL,
+  createBybitAuthHeaders,
+  getBybitCredentials,
+  safeJsonParse,
+} from '@/lib/bybit';
 import { setSharedBalance } from '@/lib/tradingState';
 
 // ============== TYPES ==============
@@ -69,7 +90,10 @@ const formatTime = (seconds: number): string => {
 // ============== API FUNCTIONS ==============
 
 // Fetch wallet balance
-const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ totalEquity: string; availableBalance: string; uid: string }> => {
+const fetchWalletBalance = async (
+  apiKey: string,
+  apiSecret: string
+): Promise<{ totalEquity: string; availableBalance: string; uid: string }> => {
   try {
     const recvWindow = '5000';
     const params = 'accountType=UNIFIED';
@@ -84,8 +108,10 @@ const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ 
     if (data?.retCode === 0 && data?.result) {
       const wallet = data.result.list?.[0] || data.result;
       const totalEquity = wallet?.totalEquity || wallet?.equity || wallet?.walletBalance || '0';
-      const availableBalance = wallet?.availableBalance || wallet?.available || wallet?.walletBalance || '0';
-      const uid = data.result.uid || data.result.accountUid || wallet?.uid || wallet?.accountUid || 'N/A';
+      const availableBalance =
+        wallet?.availableBalance || wallet?.available || wallet?.walletBalance || '0';
+      const uid =
+        data.result.uid || data.result.accountUid || wallet?.uid || wallet?.accountUid || 'N/A';
 
       return {
         totalEquity: String(totalEquity),
@@ -101,7 +127,10 @@ const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ 
 };
 
 // Fetch account info
-const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ accountType: string; uid: string }> => {
+const fetchAccountInfo = async (
+  apiKey: string,
+  apiSecret: string
+): Promise<{ accountType: string; uid: string }> => {
   try {
     const recvWindow = '5000';
     const params = '';
@@ -113,7 +142,7 @@ const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ ac
     });
 
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0 && data?.result) {
       return {
         accountType: data.result.accountType || data.result.accType || 'Unified',
@@ -166,23 +195,23 @@ const ApiCredentialsPanel = () => {
     try {
       // Fetch wallet balance
       const balanceData = await fetchWalletBalance(credentials.apiKey, credentials.apiSecret);
-      
+
       // Fetch account info
       const accountData = await fetchAccountInfo(credentials.apiKey, credentials.apiSecret);
-      
+
       const balanceNum = parseFloat(balanceData.totalEquity);
       const balanceDisplay = balanceNum > 0 ? `${balanceNum.toFixed(2)} USDT` : '0.00 USDT';
-      
+
       setBalance(balanceDisplay);
       setUid(accountData.uid);
       setAccountType(accountData.accountType);
-      
+
       setTestStatus('success');
       setTestMessage('✅ Connection verified successfully!');
       setError(null);
     } catch (err: any) {
       console.error('Connection test error:', err);
-      
+
       let userMessage = '❌ Failed to connect. Please check your credentials and network.';
       if (err.message?.includes('fetch') || err.message?.includes('network')) {
         userMessage = '❌ Network error. Please check your internet connection.';
@@ -193,7 +222,7 @@ const ApiCredentialsPanel = () => {
       } else if (err.message?.includes('10006')) {
         userMessage = '❌ Invalid API signature. Please check your API secret.';
       }
-      
+
       setTestStatus('error');
       setTestMessage(userMessage);
       setError(err.message);
@@ -213,22 +242,27 @@ const ApiCredentialsPanel = () => {
     setIsSaving(true);
     setSaveStatus('idle');
     setError(null);
-    
+
     try {
-      localStorage.setItem('bybit_credentials', JSON.stringify({
-        apiKey: credentials.apiKey,
-        apiSecret: credentials.apiSecret,
-        isTestnet: credentials.isTestnet,
-      }));
-      
-      window.dispatchEvent(new CustomEvent('bybit-credentials-saved', {
-        detail: {
+      localStorage.setItem(
+        'bybit_credentials',
+        JSON.stringify({
           apiKey: credentials.apiKey,
           apiSecret: credentials.apiSecret,
           isTestnet: credentials.isTestnet,
-        }
-      }));
-      
+        })
+      );
+
+      window.dispatchEvent(
+        new CustomEvent('bybit-credentials-saved', {
+          detail: {
+            apiKey: credentials.apiKey,
+            apiSecret: credentials.apiSecret,
+            isTestnet: credentials.isTestnet,
+          },
+        })
+      );
+
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
@@ -253,7 +287,7 @@ const ApiCredentialsPanel = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setCredentials(prev => ({
+        setCredentials((prev) => ({
           ...prev,
           apiKey: parsed.apiKey || '',
           apiSecret: parsed.apiSecret || '',
@@ -336,7 +370,10 @@ const ApiCredentialsPanel = () => {
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-400 dark:text-gray-500">Permissions:</span>
             {credentials.permissions.map((p) => (
-              <span key={p} className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300">
+              <span
+                key={p}
+                className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300"
+              >
                 {p}
               </span>
             ))}
@@ -349,11 +386,7 @@ const ApiCredentialsPanel = () => {
             disabled={isTesting}
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
           >
-            {isTesting ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Wifi size={14} />
-            )}
+            {isTesting ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />}
             {isTesting ? 'Testing...' : 'Test Connection'}
           </button>
           <button
@@ -363,8 +396,8 @@ const ApiCredentialsPanel = () => {
               saveStatus === 'success'
                 ? 'bg-green-500 text-white'
                 : saveStatus === 'error'
-                ? 'bg-red-500 text-white'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
+                  ? 'bg-red-500 text-white'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
             {isSaving ? (
@@ -381,18 +414,29 @@ const ApiCredentialsPanel = () => {
         </div>
 
         {testStatus !== 'idle' && (
-          <div className={`p-3 rounded-lg text-xs flex items-start gap-2 ${
-            testStatus === 'success' 
-              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
-          }`}>
+          <div
+            className={`p-3 rounded-lg text-xs flex items-start gap-2 ${
+              testStatus === 'success'
+                ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+            }`}
+          >
             {testStatus === 'success' ? (
-              <CheckCircle size={16} className="text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+              <CheckCircle
+                size={16}
+                className="text-green-600 dark:text-green-400 shrink-0 mt-0.5"
+              />
             ) : (
               <AlertCircle size={16} className="text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
             )}
             <div className="flex-1 min-w-0">
-              <p className={testStatus === 'success' ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>
+              <p
+                className={
+                  testStatus === 'success'
+                    ? 'text-green-700 dark:text-green-400'
+                    : 'text-red-700 dark:text-red-400'
+                }
+              >
                 {testMessage}
               </p>
               {testStatus === 'success' && (
@@ -400,19 +444,25 @@ const ApiCredentialsPanel = () => {
                   {balance && (
                     <div className="bg-white dark:bg-gray-800/80 rounded-md px-2 py-1.5">
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">Total Equity</p>
-                      <p className="text-xs font-bold font-mono text-green-600 dark:text-green-400">{balance}</p>
+                      <p className="text-xs font-bold font-mono text-green-600 dark:text-green-400">
+                        {balance}
+                      </p>
                     </div>
                   )}
                   {accountType && accountType !== 'Checking...' && (
                     <div className="bg-white dark:bg-gray-800/80 rounded-md px-2 py-1.5">
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">Account Type</p>
-                      <p className="text-xs font-bold font-mono text-blue-600 dark:text-blue-400">{accountType}</p>
+                      <p className="text-xs font-bold font-mono text-blue-600 dark:text-blue-400">
+                        {accountType}
+                      </p>
                     </div>
                   )}
                   {uid && uid !== 'N/A' && (
                     <div className="bg-white dark:bg-gray-800/80 rounded-md px-2 py-1.5 col-span-2">
                       <p className="text-[10px] text-gray-500 dark:text-gray-400">Account UID</p>
-                      <p className="text-xs font-bold font-mono text-gray-900 dark:text-white">{uid}</p>
+                      <p className="text-xs font-bold font-mono text-gray-900 dark:text-white">
+                        {uid}
+                      </p>
                     </div>
                   )}
                   {isLoadingAccountInfo && (
@@ -457,7 +507,7 @@ const SymbolSelectorPanel = () => {
       if (data?.retCode === 0 && data?.result?.list) {
         const tickers = data.result.list;
         const defaultEnabled = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
-        
+
         const mappedSymbols: SymbolConfig[] = tickers
           .filter((t: any) => t.symbol.endsWith('USDT'))
           .map((t: any) => {
@@ -492,21 +542,21 @@ const SymbolSelectorPanel = () => {
   }, [fetchSymbols]);
 
   const toggleSymbol = (symbol: string) => {
-    setSymbols(prev => prev.map(s => 
-      s.symbol === symbol ? { ...s, enabled: !s.enabled } : s
-    ));
+    setSymbols((prev) =>
+      prev.map((s) => (s.symbol === symbol ? { ...s, enabled: !s.enabled } : s))
+    );
   };
 
   const toggleAll = () => {
-    const allEnabled = symbols.every(s => s.enabled);
-    setSymbols(prev => prev.map(s => ({ ...s, enabled: !allEnabled })));
+    const allEnabled = symbols.every((s) => s.enabled);
+    setSymbols((prev) => prev.map((s) => ({ ...s, enabled: !allEnabled })));
   };
 
-  const filteredSymbols = symbols.filter(s => 
+  const filteredSymbols = symbols.filter((s) =>
     s.symbol.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const enabledCount = symbols.filter(s => s.enabled).length;
+  const enabledCount = symbols.filter((s) => s.enabled).length;
 
   if (isLoading) {
     return (
@@ -563,7 +613,7 @@ const SymbolSelectorPanel = () => {
           onClick={toggleAll}
           className="px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
-          {symbols.every(s => s.enabled) ? 'Deselect All' : 'Select All'}
+          {symbols.every((s) => s.enabled) ? 'Deselect All' : 'Select All'}
         </button>
       </div>
 
@@ -580,9 +630,13 @@ const SymbolSelectorPanel = () => {
               }`}
             >
               <div className="flex items-center justify-between w-full">
-                <span className={`text-xs font-medium ${
-                  symbol.enabled ? 'text-blue-700 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'
-                }`}>
+                <span
+                  className={`text-xs font-medium ${
+                    symbol.enabled
+                      ? 'text-blue-700 dark:text-blue-400'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
                   {symbol.symbol}
                 </span>
                 {symbol.enabled ? (
@@ -593,12 +647,16 @@ const SymbolSelectorPanel = () => {
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-[9px] text-gray-500 dark:text-gray-400">${symbol.price}</span>
-                <span className={`text-[9px] ${
-                  parseFloat(symbol.change24h) >= 0 ? 'text-green-600' : 'text-red-600'
-                }`}>
+                <span
+                  className={`text-[9px] ${
+                    parseFloat(symbol.change24h) >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
                   {symbol.change24h}
                 </span>
-                <span className="text-[9px] text-gray-400 dark:text-gray-500">{symbol.volume24h}</span>
+                <span className="text-[9px] text-gray-400 dark:text-gray-500">
+                  {symbol.volume24h}
+                </span>
               </div>
             </button>
           ))
@@ -647,7 +705,7 @@ const WebSocketConfigPanel = () => {
   const unsubscribeRef = useRef<() => void | null>(null);
 
   const addLog = (message: string) => {
-    setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-20));
+    setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-20));
   };
 
   const connect = () => {
@@ -663,7 +721,7 @@ const WebSocketConfigPanel = () => {
     let localCount = 0;
     unsubscribeRef.current = realtimeManager.subscribeTicks((data: any) => {
       localCount++;
-      setMessageCount(prev => prev + 1);
+      setMessageCount((prev) => prev + 1);
       setStatus('connected');
       addLog('📩 Received tick data');
     });
@@ -672,7 +730,10 @@ const WebSocketConfigPanel = () => {
       if (localCount === 0) {
         setStatus('error');
         addLog('⚠️ No messages received during test window');
-        if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null; }
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
       }
     }, 3000);
   };
@@ -709,15 +770,17 @@ const WebSocketConfigPanel = () => {
           WebSocket Configuration
         </h3>
         <div className="flex items-center gap-2">
-          <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${
-            status === 'connected' 
-              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-              : status === 'connecting'
-              ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-              : status === 'error'
-              ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-          }`}>
+          <span
+            className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${
+              status === 'connected'
+                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                : status === 'connecting'
+                  ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                  : status === 'error'
+                    ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+            }`}
+          >
             {status === 'connected' && <CheckCircle size={10} />}
             {status === 'connecting' && <Loader2 size={10} className="animate-spin" />}
             {status === 'error' && <XCircle size={10} />}
@@ -762,7 +825,9 @@ const WebSocketConfigPanel = () => {
             <input
               type="number"
               value={config.maxReconnectAttempts}
-              onChange={(e) => setConfig({ ...config, maxReconnectAttempts: parseInt(e.target.value) })}
+              onChange={(e) =>
+                setConfig({ ...config, maxReconnectAttempts: parseInt(e.target.value) })
+              }
               className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
             />
           </div>
@@ -779,16 +844,16 @@ const WebSocketConfigPanel = () => {
             Enable Compression
           </label>
           <div>
-            <label className="text-xs text-gray-600 dark:text-gray-400 mr-2">
-              Batch Size
-            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-400 mr-2">Batch Size</label>
             <select
               value={config.batchSize}
               onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) })}
               className="px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
             >
-              {[5, 10, 20, 50].map(v => (
-                <option key={v} value={v}>{v}</option>
+              {[5, 10, 20, 50].map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
               ))}
             </select>
           </div>
@@ -811,8 +876,11 @@ const WebSocketConfigPanel = () => {
             ) : (
               <Wifi size={14} />
             )}
-            {status === 'connected' ? 'Disconnect' : 
-             status === 'connecting' ? 'Connecting...' : 'Connect'}
+            {status === 'connected'
+              ? 'Disconnect'
+              : status === 'connecting'
+                ? 'Connecting...'
+                : 'Connect'}
           </button>
         </div>
 
@@ -856,12 +924,10 @@ const ConnectionHealthPanel = () => {
 
       if (data?.retCode === 0) {
         const uptime = (Date.now() - startTime) / 1000;
-        const quality: ConnectionHealth['quality'] = 
-          latency < 100 ? 'excellent' :
-          latency < 200 ? 'good' :
-          latency < 400 ? 'fair' : 'poor';
+        const quality: ConnectionHealth['quality'] =
+          latency < 100 ? 'excellent' : latency < 200 ? 'good' : latency < 400 ? 'fair' : 'poor';
 
-        setHealth(prev => ({
+        setHealth((prev) => ({
           ...prev,
           status: 'connected',
           latency,
@@ -871,11 +937,11 @@ const ConnectionHealthPanel = () => {
           messagesReceived: prev.messagesReceived + 1,
         }));
       } else {
-        setHealth(prev => ({ ...prev, status: 'error' }));
+        setHealth((prev) => ({ ...prev, status: 'error' }));
         setError('Failed to get server time');
       }
     } catch (error) {
-      setHealth(prev => ({ ...prev, status: 'error', latency: 999 }));
+      setHealth((prev) => ({ ...prev, status: 'error', latency: 999 }));
       setError('Connection failed');
     } finally {
       setIsLoading(false);
@@ -890,20 +956,29 @@ const ConnectionHealthPanel = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'connected': return 'text-green-600 dark:text-green-400';
-      case 'connecting': return 'text-yellow-600 dark:text-yellow-400';
-      case 'error': return 'text-red-600 dark:text-red-400';
-      default: return 'text-gray-600 dark:text-gray-400';
+      case 'connected':
+        return 'text-green-600 dark:text-green-400';
+      case 'connecting':
+        return 'text-yellow-600 dark:text-yellow-400';
+      case 'error':
+        return 'text-red-600 dark:text-red-400';
+      default:
+        return 'text-gray-600 dark:text-gray-400';
     }
   };
 
   const getQualityColor = (quality: string) => {
     switch (quality) {
-      case 'excellent': return 'text-green-600 dark:text-green-400';
-      case 'good': return 'text-blue-600 dark:text-blue-400';
-      case 'fair': return 'text-yellow-600 dark:text-yellow-400';
-      case 'poor': return 'text-red-600 dark:text-red-400';
-      default: return 'text-gray-600 dark:text-gray-400';
+      case 'excellent':
+        return 'text-green-600 dark:text-green-400';
+      case 'good':
+        return 'text-blue-600 dark:text-blue-400';
+      case 'fair':
+        return 'text-yellow-600 dark:text-yellow-400';
+      case 'poor':
+        return 'text-red-600 dark:text-red-400';
+      default:
+        return 'text-gray-600 dark:text-gray-400';
     }
   };
 
@@ -912,7 +987,9 @@ const ConnectionHealthPanel = () => {
       <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-5">
         <div className="flex items-center justify-center py-8">
           <Loader2 size={24} className="animate-spin text-blue-600" />
-          <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Checking connection...</span>
+          <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">
+            Checking connection...
+          </span>
         </div>
       </div>
     );
@@ -925,7 +1002,7 @@ const ConnectionHealthPanel = () => {
           <Activity size={16} className="text-green-600 dark:text-green-400" />
           Connection Health
         </h3>
-        <button 
+        <button
           onClick={checkHealth}
           className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
         >
@@ -944,7 +1021,9 @@ const ConnectionHealthPanel = () => {
         <div className="grid grid-cols-2 gap-3">
           <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
             <div className="text-xs text-gray-500 dark:text-gray-400">Status</div>
-            <div className={`text-sm font-semibold flex items-center gap-1 ${getStatusColor(health.status)}`}>
+            <div
+              className={`text-sm font-semibold flex items-center gap-1 ${getStatusColor(health.status)}`}
+            >
               {health.status === 'connected' && <CheckCircle size={14} />}
               {health.status === 'error' && <XCircle size={14} />}
               {health.status.charAt(0).toUpperCase() + health.status.slice(1)}
@@ -977,18 +1056,25 @@ const ConnectionHealthPanel = () => {
         </div>
 
         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-          <div 
+          <div
             className={`h-1.5 rounded-full ${
-              health.quality === 'excellent' ? 'bg-green-500' :
-              health.quality === 'good' ? 'bg-blue-500' :
-              health.quality === 'fair' ? 'bg-yellow-500' :
-              'bg-red-500'
+              health.quality === 'excellent'
+                ? 'bg-green-500'
+                : health.quality === 'good'
+                  ? 'bg-blue-500'
+                  : health.quality === 'fair'
+                    ? 'bg-yellow-500'
+                    : 'bg-red-500'
             }`}
-            style={{ 
-              width: health.quality === 'excellent' ? '95%' :
-                     health.quality === 'good' ? '75%' :
-                     health.quality === 'fair' ? '50%' :
-                     '25%'
+            style={{
+              width:
+                health.quality === 'excellent'
+                  ? '95%'
+                  : health.quality === 'good'
+                    ? '75%'
+                    : health.quality === 'fair'
+                      ? '50%'
+                      : '25%',
             }}
           />
         </div>
@@ -1022,7 +1108,8 @@ export default function SettingsPage() {
                 Settings
               </h1>
               <p className="text-gray-500 dark:text-gray-400 text-sm mt-0.5">
-                Configure Bybit API credentials, target symbols, WebSocket feeds, and monitor connection health
+                Configure Bybit API credentials, target symbols, WebSocket feeds, and monitor
+                connection health
               </p>
             </div>
           </div>
@@ -1049,7 +1136,8 @@ export default function SettingsPage() {
         <div className="mt-4 p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
           <p className="text-center text-[11px] text-yellow-700 dark:text-yellow-400 flex items-center justify-center gap-2">
             <Shield size={12} />
-            API credentials are stored in browser session only. For production use, store keys server-side via environment variables.
+            API credentials are stored in browser session only. For production use, store keys
+            server-side via environment variables.
           </p>
         </div>
       </div>

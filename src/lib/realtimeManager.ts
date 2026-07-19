@@ -28,21 +28,36 @@ class RealtimeManager {
   subscribeData(cb: DataCallback) {
     this.dataSubscribers.add(cb);
     this.ensureRunning();
-    return () => { this.dataSubscribers.delete(cb); this.maybeStop(); };
+    return () => {
+      this.dataSubscribers.delete(cb);
+      this.maybeStop();
+    };
   }
 
   subscribeTicks(cb: TickCallback) {
     this.tickSubscribers.add(cb);
     this.ensureRunning();
-    return () => { this.tickSubscribers.delete(cb); this.maybeStop(); };
+    return () => {
+      this.tickSubscribers.delete(cb);
+      this.maybeStop();
+    };
   }
 
   async fetchOnce() {
     try {
       const [wallet, positions, orders] = await Promise.allSettled([
-        requestManager.executeWithRateLimit<any>('/api/bybit', { method: 'POST', body: JSON.stringify({ endpoint: '/v5/account/wallet-balance', method: 'GET' }) }),
-        requestManager.executeWithRateLimit<any>('/api/bybit', { method: 'POST', body: JSON.stringify({ endpoint: '/v5/position/list', method: 'GET' }) }),
-        requestManager.executeWithRateLimit<any>('/api/bybit', { method: 'POST', body: JSON.stringify({ endpoint: '/v5/order/realtime', method: 'GET' }) }),
+        requestManager.executeWithRateLimit<any>('/api/bybit', {
+          method: 'POST',
+          body: JSON.stringify({ endpoint: '/v5/account/wallet-balance', method: 'GET' }),
+        }),
+        requestManager.executeWithRateLimit<any>('/api/bybit', {
+          method: 'POST',
+          body: JSON.stringify({ endpoint: '/v5/position/list', method: 'GET' }),
+        }),
+        requestManager.executeWithRateLimit<any>('/api/bybit', {
+          method: 'POST',
+          body: JSON.stringify({ endpoint: '/v5/order/realtime', method: 'GET' }),
+        }),
       ]);
 
       const data = {
@@ -65,13 +80,21 @@ class RealtimeManager {
 
   private emitData(data: any) {
     for (const cb of Array.from(this.dataSubscribers)) {
-      try { cb(data); } catch (e) { /* swallow */ }
+      try {
+        cb(data);
+      } catch (e) {
+        /* swallow */
+      }
     }
   }
 
   private emitTick(tick: any) {
     for (const cb of Array.from(this.tickSubscribers)) {
-      try { cb(tick); } catch (e) { /* swallow */ }
+      try {
+        cb(tick);
+      } catch (e) {
+        /* swallow */
+      }
     }
   }
 
@@ -100,10 +123,24 @@ class RealtimeManager {
 
   stop() {
     this.isStarted = false;
-    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-    if (this.wsHeartbeat) { clearInterval(this.wsHeartbeat); this.wsHeartbeat = null; }
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (this.wsHeartbeat) {
+      clearInterval(this.wsHeartbeat);
+      this.wsHeartbeat = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
   }
 
   private connectWebSocket() {
@@ -115,19 +152,34 @@ class RealtimeManager {
         // Silent on open
         if (this.wsHeartbeat) clearInterval(this.wsHeartbeat);
         this.wsHeartbeat = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op: 'ping' }));
+          if (this.ws && this.ws.readyState === WebSocket.OPEN)
+            this.ws.send(JSON.stringify({ op: 'ping' }));
         }, 30000);
         // Subscribe to ticker topics for supported symbols
         const symbols = [
-          'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-          'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
-          'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
+          'BTCUSDT',
+          'ETHUSDT',
+          'SOLUSDT',
+          'BNBUSDT',
+          'XRPUSDT',
+          'DOGEUSDT',
+          'ADAUSDT',
+          'AVAXUSDT',
+          'LINKUSDT',
+          'DOTUSDT',
+          'MATICUSDT',
+          'LTCUSDT',
+          'NEARUSDT',
+          'APTUSDT',
+          'ARBUSDT',
         ];
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(JSON.stringify({
-            op: 'subscribe',
-            args: symbols.map(s => `tickers.${s}`),
-          }));
+          this.ws.send(
+            JSON.stringify({
+              op: 'subscribe',
+              args: symbols.map((s) => `tickers.${s}`),
+            })
+          );
         }
       };
       this.ws.onmessage = (ev) => {
@@ -142,7 +194,10 @@ class RealtimeManager {
       };
       this.ws.onclose = () => {
         this.ws = null;
-        if (this.wsHeartbeat) { clearInterval(this.wsHeartbeat); this.wsHeartbeat = null; }
+        if (this.wsHeartbeat) {
+          clearInterval(this.wsHeartbeat);
+          this.wsHeartbeat = null;
+        }
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = setTimeout(() => this.connectWebSocket(), 5000);
       };

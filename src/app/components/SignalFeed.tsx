@@ -32,7 +32,15 @@ interface Signal {
 const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
-const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+const SUPPORTED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'ADAUSDT',
+  'DOGEUSDT',
+];
 
 // ============== API HELPERS ==============
 const safeJsonParse = async (response: Response) => {
@@ -50,9 +58,9 @@ const safeJsonParse = async (response: Response) => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
 
@@ -76,15 +84,20 @@ const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => 
 // ============== COMPONENT ==============
 
 const CONFIDENCE_COLOR = (c: number) =>
-  c >= 88 ? 'text-positive border-positive/30 bg-positive-subtle'
-    : c >= 80 ? 'text-info border-info/30 bg-info-subtle' : 'text-warning border-warning/30 bg-warning-subtle';
+  c >= 88
+    ? 'text-positive border-positive/30 bg-positive-subtle'
+    : c >= 80
+      ? 'text-info border-info/30 bg-info-subtle'
+      : 'text-warning border-warning/30 bg-warning-subtle';
 
 export default function SignalFeed() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'executed'>('all');
   const [minConfidence, setMinConfidence] = useState(75);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connected' | 'disconnected' | 'connecting'
+  >('disconnected');
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -115,7 +128,8 @@ export default function SignalFeed() {
     const statuses: Signal['status'][] = ['pending', 'confirmed', 'executed'];
     const status = confidence > 80 ? 'confirmed' : statuses[Math.floor(Math.random() * 2)];
 
-    const regime = Math.abs(change24h) > 3 ? 'trending' : Math.abs(change24h) > 1 ? 'ranging' : 'volatile';
+    const regime =
+      Math.abs(change24h) > 3 ? 'trending' : Math.abs(change24h) > 1 ? 'ranging' : 'volatile';
     const timeframe = Math.abs(change24h) > 2 ? '15m' : '5m';
 
     const rsiValue = Math.round(50 + change24h * 1.5);
@@ -178,9 +192,11 @@ export default function SignalFeed() {
       generatedSignals.sort((a, b) => b.confidence - a.confidence);
 
       // Merge with existing signals, keeping only active ones
-      const existingActive = signals.filter(s => s.status === 'pending' || s.status === 'confirmed');
+      const existingActive = signals.filter(
+        (s) => s.status === 'pending' || s.status === 'confirmed'
+      );
       const combined = [...generatedSignals, ...existingActive];
-      const unique = Array.from(new Map(combined.map(s => [s.symbol, s])).values());
+      const unique = Array.from(new Map(combined.map((s) => [s.symbol, s])).values());
 
       setSignals(unique.slice(0, 50));
     } catch (error) {
@@ -194,7 +210,9 @@ export default function SignalFeed() {
 
   // Subscribe to singleton ticks rather than opening a dedicated WebSocket
 
-  const disconnectWebSocket = () => { /* noop - singleton manages WS */ };
+  const disconnectWebSocket = () => {
+    /* noop - singleton manages WS */
+  };
 
   useEffect(() => {
     fetchSignals();
@@ -204,8 +222,10 @@ export default function SignalFeed() {
         if (ticker && ticker.symbol) {
           const signal = generateSignalFromData(ticker.symbol, ticker);
           if (signal) {
-            setSignals(prev => {
-              const filtered = prev.filter(s => s.symbol !== ticker.symbol || s.status === 'executed');
+            setSignals((prev) => {
+              const filtered = prev.filter(
+                (s) => s.symbol !== ticker.symbol || s.status === 'executed'
+              );
               return [signal, ...filtered].slice(0, 50);
             });
           }
@@ -231,13 +251,18 @@ export default function SignalFeed() {
     return s.confidence >= minConfidence;
   });
 
-  const liveCount = signals.filter((s) => s.status === 'pending' || s.status === 'confirmed').length;
+  const liveCount = signals.filter(
+    (s) => s.status === 'pending' || s.status === 'confirmed'
+  ).length;
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
-      case 'connected': return <span className="text-green-500">●</span>;
-      case 'connecting': return <Loader2 size={12} className="animate-spin text-yellow-500" />;
-      default: return <span className="text-gray-400">●</span>;
+      case 'connected':
+        return <span className="text-green-500">●</span>;
+      case 'connecting':
+        return <Loader2 size={12} className="animate-spin text-yellow-500" />;
+      default:
+        return <span className="text-gray-400">●</span>;
     }
   };
 
@@ -284,7 +309,9 @@ export default function SignalFeed() {
           </button>
           <Filter size={12} className="text-muted-foreground" />
           <span className="text-xs text-muted-foreground">Min:</span>
-          <span className="text-xs font-semibold font-tabular text-primary w-7">{minConfidence}%</span>
+          <span className="text-xs font-semibold font-tabular text-primary w-7">
+            {minConfidence}%
+          </span>
           <input
             type="range"
             min={70}
@@ -323,26 +350,48 @@ export default function SignalFeed() {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
             <Zap size={28} className="text-muted-foreground mb-3" />
-            <p className="text-sm font-semibold text-foreground">No signals match current filters</p>
-            <p className="text-xs text-muted-foreground mt-1">{connectionStatus === 'connected' ? 'Analyzing market data...' : 'Waiting for connection...'}</p>
+            <p className="text-sm font-semibold text-foreground">
+              No signals match current filters
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {connectionStatus === 'connected'
+                ? 'Analyzing market data...'
+                : 'Waiting for connection...'}
+            </p>
           </div>
         ) : (
           filtered.map((signal) => (
-            <div key={signal.id} className="px-4 py-3.5 hover:bg-muted/20 transition-colors duration-100 fade-in">
+            <div
+              key={signal.id}
+              className="px-4 py-3.5 hover:bg-muted/20 transition-colors duration-100 fade-in"
+            >
               <div className="flex items-start justify-between gap-3 mb-2">
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5">
-                    {signal.direction === 'long' ? <TrendingUp size={13} className="text-positive" /> : <TrendingDown size={13} className="text-negative" />}
-                    <span className="text-sm font-semibold font-mono text-foreground">{signal.symbol}</span>
+                    {signal.direction === 'long' ? (
+                      <TrendingUp size={13} className="text-positive" />
+                    ) : (
+                      <TrendingDown size={13} className="text-negative" />
+                    )}
+                    <span className="text-sm font-semibold font-mono text-foreground">
+                      {signal.symbol}
+                    </span>
                   </div>
                   <StatusBadge variant={signal.direction} size="sm" />
-                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">{signal.timeframe}</span>
-                  <span className={`text-[10px] ${signal.change24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {signal.change24h >= 0 ? '+' : ''}{signal.change24h.toFixed(1)}%
+                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
+                    {signal.timeframe}
+                  </span>
+                  <span
+                    className={`text-[10px] ${signal.change24h >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                  >
+                    {signal.change24h >= 0 ? '+' : ''}
+                    {signal.change24h.toFixed(1)}%
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-xs font-bold font-tabular px-2 py-0.5 rounded border ${CONFIDENCE_COLOR(signal.confidence)}`}>
+                  <span
+                    className={`text-xs font-bold font-tabular px-2 py-0.5 rounded border ${CONFIDENCE_COLOR(signal.confidence)}`}
+                  >
                     {Math.round(signal.confidence)}%
                   </span>
                   <StatusBadge variant={signal.status as any} size="sm" />
@@ -350,18 +399,48 @@ export default function SignalFeed() {
               </div>
 
               <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[10px] font-mono mb-2">
-                <div><span className="text-muted-foreground">Entry: </span><span className="text-foreground font-tabular">${formatPrice(signal.entryPrice)}</span></div>
-                <div><span className="text-negative">SL: </span><span className="text-foreground font-tabular">${formatPrice(signal.stopLoss)}</span></div>
-                <div><span className="text-positive">TP1: </span><span className="text-foreground font-tabular">${formatPrice(signal.takeProfit1)}</span></div>
-                <div><span className="text-muted-foreground">R:R </span><span className={signal.riskReward >= 2.5 ? 'text-positive' : 'text-warning'}>1:{signal.riskReward.toFixed(1)}</span></div>
-                <div><span className="text-muted-foreground">Vol× </span><span className="text-info font-tabular">{signal.volumeSpike.toFixed(1)}x</span></div>
-                <div><StatusBadge variant={signal.regime} size="sm" /></div>
+                <div>
+                  <span className="text-muted-foreground">Entry: </span>
+                  <span className="text-foreground font-tabular">
+                    ${formatPrice(signal.entryPrice)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-negative">SL: </span>
+                  <span className="text-foreground font-tabular">
+                    ${formatPrice(signal.stopLoss)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-positive">TP1: </span>
+                  <span className="text-foreground font-tabular">
+                    ${formatPrice(signal.takeProfit1)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">R:R </span>
+                  <span className={signal.riskReward >= 2.5 ? 'text-positive' : 'text-warning'}>
+                    1:{signal.riskReward.toFixed(1)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Vol× </span>
+                  <span className="text-info font-tabular">{signal.volumeSpike.toFixed(1)}x</span>
+                </div>
+                <div>
+                  <StatusBadge variant={signal.regime} size="sm" />
+                </div>
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="flex gap-1 flex-wrap">
                   {signal.indicators.map((ind) => (
-                    <span key={`ind-${signal.id}-${ind}`} className="text-[9px] px-1.5 py-0.5 bg-muted text-muted-foreground rounded font-mono">{ind}</span>
+                    <span
+                      key={`ind-${signal.id}-${ind}`}
+                      className="text-[9px] px-1.5 py-0.5 bg-muted text-muted-foreground rounded font-mono"
+                    >
+                      {ind}
+                    </span>
                   ))}
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-muted-foreground">

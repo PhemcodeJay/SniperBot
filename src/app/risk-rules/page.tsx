@@ -4,12 +4,31 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import {
+  BYBIT_BASE_URL,
+  createBybitAuthHeaders,
+  getBybitCredentials,
+  safeJsonParse,
+} from '@/lib/bybit';
 import { formatUsd } from '@/lib/formatters';
-import { 
-  Shield, Save, AlertTriangle, RotateCcw, CheckCircle, 
-  Info, Zap, TrendingDown, Settings, Lock, Unlock,
-  Clock, Database, Loader2, Wifi, WifiOff, X
+import {
+  Shield,
+  Save,
+  AlertTriangle,
+  RotateCcw,
+  CheckCircle,
+  Info,
+  Zap,
+  TrendingDown,
+  Settings,
+  Lock,
+  Unlock,
+  Clock,
+  Database,
+  Loader2,
+  Wifi,
+  WifiOff,
+  X,
 } from 'lucide-react';
 import { realtimeManager } from '@/lib/realtimeManager';
 
@@ -113,7 +132,9 @@ const fetchWalletBalance = async (): Promise<{ totalEquity: number; availableBal
     if (data?.retCode === 0 && data?.result?.list?.[0]) {
       const wallet = data.result.list[0];
       const totalEquity = parseFloat(wallet.totalEquity || wallet.equity || '0');
-      const availableBalance = parseFloat(wallet.availableBalance || wallet.available || wallet.totalAvailableBalance || '0');
+      const availableBalance = parseFloat(
+        wallet.availableBalance || wallet.available || wallet.totalAvailableBalance || '0'
+      );
       return {
         totalEquity: Number.isFinite(totalEquity) ? totalEquity : 0,
         availableBalance: Number.isFinite(availableBalance) ? availableBalance : 0,
@@ -156,22 +177,22 @@ const fetchPositions = async (): Promise<any[]> => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -184,11 +205,16 @@ const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => 
 export default function RiskRulesPage() {
   const [rules, setRules] = useState<RiskRules>(DEFAULT_RULES);
   const [saved, setSaved] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [saveMessage, setSaveMessage] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<'loss' | 'position' | 'stoploss' | 'advanced'>('loss');
   const [isLoading, setIsLoading] = useState(true);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'disconnected' | 'connecting' | 'connected' | 'error'
+  >('connecting');
   const [error, setError] = useState<string | null>(null);
   const [isApiConnected, setIsApiConnected] = useState(false);
   const [riskAssessment, setRiskAssessment] = useState<RiskAssessment>({
@@ -228,7 +254,7 @@ export default function RiskRulesPage() {
   const fetchMarketDataAndAssessRisk = useCallback(async () => {
     try {
       setIsLoading(true);
-      
+
       const { apiKey, apiSecret } = getApiCredentials();
       const hasApiKeys = !!(apiKey && apiSecret);
 
@@ -241,10 +267,10 @@ export default function RiskRulesPage() {
 
       // Fetch wallet balance
       const { totalEquity, availableBalance } = await fetchWalletBalance();
-      
+
       // Fetch positions
       const positions = await fetchPositions();
-      
+
       // Fetch ticker data
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       setMarketData(tickers);
@@ -262,28 +288,31 @@ export default function RiskRulesPage() {
         const pnl = parseFloat(pos.unrealisedPnl || 0);
         const leverage = parseFloat(pos.leverage || 5);
         const positionValue = entryPrice * Math.abs(size);
-        
+
         totalPnL += pnl;
         if (totalEquity > 0) {
-          totalExposure += (positionValue * leverage) / totalEquity * 100;
+          totalExposure += ((positionValue * leverage) / totalEquity) * 100;
         }
-        
+
         // Check correlation (simplified)
-        const change24h = tickers[pos.symbol] ? parseFloat(tickers[pos.symbol].price24hPcnt) * 100 : 0;
+        const change24h = tickers[pos.symbol]
+          ? parseFloat(tickers[pos.symbol].price24hPcnt) * 100
+          : 0;
         if (Math.abs(change24h) > 2) {
           correlatedCount++;
         }
       });
 
       // Calculate drawdown
-      const dailyLossPct = totalEquity > 0 ? Math.min(100, Math.abs(totalPnL) / totalEquity * 100) : 0;
+      const dailyLossPct =
+        totalEquity > 0 ? Math.min(100, (Math.abs(totalPnL) / totalEquity) * 100) : 0;
       const weeklyDrawdown = Math.min(15, dailyLossPct * 1.5 + Math.random() * 2);
       const monthlyDrawdown = Math.min(25, dailyLossPct * 2 + Math.random() * 3);
 
       // Determine risk score
       let riskScore: RiskAssessment['riskScore'] = 'Low';
       const exposurePct = Math.min(100, totalExposure);
-      
+
       if (exposurePct > 20 || dailyLossPct > 5) riskScore = 'Critical';
       else if (exposurePct > 15 || dailyLossPct > 3) riskScore = 'High';
       else if (exposurePct > 10 || dailyLossPct > 2) riskScore = 'Medium';
@@ -305,7 +334,6 @@ export default function RiskRulesPage() {
 
       setIsApiConnected(true);
       setError(null);
-
     } catch (err: any) {
       console.error('Error fetching risk data:', err);
       setError(err.message || 'Failed to fetch risk data');
@@ -314,7 +342,9 @@ export default function RiskRulesPage() {
     }
   }, [rules.perTradeRisk, rules.maxDailyLoss]);
 
-  const disconnectWebSocket = useCallback(() => { /* noop - singleton handles websocket */ }, []);
+  const disconnectWebSocket = useCallback(() => {
+    /* noop - singleton handles websocket */
+  }, []);
 
   // Initialize
   useEffect(() => {
@@ -322,10 +352,12 @@ export default function RiskRulesPage() {
     const unsubscribe = realtimeManager.subscribeTicks((ticker: any) => {
       try {
         if (ticker && ticker.symbol) {
-          setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
+          setMarketData((prev) => ({ ...prev, [ticker.symbol]: ticker }));
           fetchMarketDataAndAssessRisk();
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        /* ignore */
+      }
     });
 
     const interval = setInterval(() => {
@@ -408,11 +440,12 @@ export default function RiskRulesPage() {
     return (
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-            {label}
-          </label>
-          <span className={`text-sm font-mono font-bold ${isWarn ? 'text-yellow-600 dark:text-yellow-400' : 'text-blue-600 dark:text-blue-400'}`}>
-            {val}{unit}
+          <label className="text-xs font-medium text-gray-600 dark:text-gray-400">{label}</label>
+          <span
+            className={`text-sm font-mono font-bold ${isWarn ? 'text-yellow-600 dark:text-yellow-400' : 'text-blue-600 dark:text-blue-400'}`}
+          >
+            {val}
+            {unit}
           </span>
         </div>
         <input
@@ -455,10 +488,14 @@ export default function RiskRulesPage() {
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
-      case 'connected': return <Wifi size={14} className="text-green-500" />;
-      case 'connecting': return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
-      case 'error': return <WifiOff size={14} className="text-red-500" />;
-      default: return <WifiOff size={14} className="text-gray-500" />;
+      case 'connected':
+        return <Wifi size={14} className="text-green-500" />;
+      case 'connecting':
+        return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
+      case 'error':
+        return <WifiOff size={14} className="text-red-500" />;
+      default:
+        return <WifiOff size={14} className="text-gray-500" />;
     }
   };
 
@@ -491,14 +528,22 @@ export default function RiskRulesPage() {
                 Define hard limits and protective mechanisms for capital preservation
                 <span className="flex items-center gap-1 text-xs">
                   {getConnectionIcon()}
-                  <span className={`capitalize ${
-                    connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
-                    connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
-                    'text-gray-500 dark:text-gray-400'
-                  }`}>
-                    {connectionStatus === 'connected' ? 'Live' : 
-                     connectionStatus === 'connecting' ? 'Connecting...' :
-                     connectionStatus === 'error' ? 'Error' : 'Disconnected'}
+                  <span
+                    className={`capitalize ${
+                      connectionStatus === 'connected'
+                        ? 'text-green-600 dark:text-green-400'
+                        : connectionStatus === 'error'
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    {connectionStatus === 'connected'
+                      ? 'Live'
+                      : connectionStatus === 'connecting'
+                        ? 'Connecting...'
+                        : connectionStatus === 'error'
+                          ? 'Error'
+                          : 'Disconnected'}
                   </span>
                 </span>
                 {isApiConnected && (
@@ -528,8 +573,8 @@ export default function RiskRulesPage() {
                 saved
                   ? 'bg-green-500 text-white'
                   : isDirty
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
               }`}
             >
               <Save size={14} /> {saved ? 'Saved!' : 'Save Rules'}
@@ -550,22 +595,31 @@ export default function RiskRulesPage() {
 
         {/* Save Message */}
         {saveMessage && (
-          <div className={`p-3 rounded-lg flex items-center gap-2 ${
-            saveMessage.type === 'success' 
-              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400'
-              : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
-          }`}>
-            {saveMessage.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+          <div
+            className={`p-3 rounded-lg flex items-center gap-2 ${
+              saveMessage.type === 'success'
+                ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400'
+                : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
+            }`}
+          >
+            {saveMessage.type === 'success' ? (
+              <CheckCircle size={16} />
+            ) : (
+              <AlertTriangle size={16} />
+            )}
             <span className="text-sm">{saveMessage.text}</span>
           </div>
         )}
 
         {/* Warning Banner */}
         <div className="flex items-start gap-3 p-4 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
-          <AlertTriangle size={16} className="text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+          <AlertTriangle
+            size={16}
+            className="text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0"
+          />
           <div>
             <p className="text-xs text-yellow-700 dark:text-yellow-400">
-              Risk rules are enforced in real-time. Changes take effect on the next trade cycle. 
+              Risk rules are enforced in real-time. Changes take effect on the next trade cycle.
               Tightening limits mid-session may trigger immediate position reviews.
             </p>
             <p className="text-xs text-yellow-600 dark:text-yellow-500 mt-1 flex items-center gap-1">
@@ -578,12 +632,36 @@ export default function RiskRulesPage() {
         {/* Risk Assessment Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: 'Total Equity', value: formatUsd(riskAssessment.totalEquity, '$0.00', true), color: 'text-blue-600' },
-            { label: 'Current Exposure', value: `${riskAssessment.currentExposure}%`, color: riskAssessment.currentExposure > 10 ? 'text-yellow-600' : 'text-green-600' },
-            { label: 'Daily P&L', value: `${riskAssessment.dailyPnL >= 0 ? '+' : ''}${formatUsd(riskAssessment.dailyPnL, '$0.00', true)}`, color: riskAssessment.dailyPnL >= 0 ? 'text-green-600' : 'text-red-600' },
-            { label: 'Risk Score', value: riskAssessment.riskScore, color: riskAssessment.riskScore === 'Low' ? 'text-green-600' : riskAssessment.riskScore === 'Critical' ? 'text-red-600' : 'text-yellow-600' },
+            {
+              label: 'Total Equity',
+              value: formatUsd(riskAssessment.totalEquity, '$0.00', true),
+              color: 'text-blue-600',
+            },
+            {
+              label: 'Current Exposure',
+              value: `${riskAssessment.currentExposure}%`,
+              color: riskAssessment.currentExposure > 10 ? 'text-yellow-600' : 'text-green-600',
+            },
+            {
+              label: 'Daily P&L',
+              value: `${riskAssessment.dailyPnL >= 0 ? '+' : ''}${formatUsd(riskAssessment.dailyPnL, '$0.00', true)}`,
+              color: riskAssessment.dailyPnL >= 0 ? 'text-green-600' : 'text-red-600',
+            },
+            {
+              label: 'Risk Score',
+              value: riskAssessment.riskScore,
+              color:
+                riskAssessment.riskScore === 'Low'
+                  ? 'text-green-600'
+                  : riskAssessment.riskScore === 'Critical'
+                    ? 'text-red-600'
+                    : 'text-yellow-600',
+            },
           ].map((card) => (
-            <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+            <div
+              key={card.label}
+              className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3"
+            >
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{card.label}</p>
               <p className={`text-lg font-bold font-mono ${card.color}`}>{card.value}</p>
             </div>
@@ -606,49 +684,53 @@ export default function RiskRulesPage() {
               Loss Limits & Drawdown Controls
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <SliderField 
-                label="Per-Trade Risk (% of capital)" 
-                field="perTradeRisk" 
-                min={0.1} 
-                max={3.0} 
-                step={0.1} 
-                unit="%" 
+              <SliderField
+                label="Per-Trade Risk (% of capital)"
+                field="perTradeRisk"
+                min={0.1}
+                max={3.0}
+                step={0.1}
+                unit="%"
                 warn={2.0}
                 description="Maximum loss allowed per individual trade"
               />
-              <SliderField 
-                label="Daily Loss Limit (% of capital)" 
-                field="maxDailyLoss" 
-                min={1.0} 
-                max={10.0} 
-                step={0.5} 
-                unit="%" 
+              <SliderField
+                label="Daily Loss Limit (% of capital)"
+                field="maxDailyLoss"
+                min={1.0}
+                max={10.0}
+                step={0.5}
+                unit="%"
                 warn={7.0}
                 description="Trading will halt if this limit is reached"
               />
-              <SliderField 
-                label="Weekly Drawdown Limit (%)" 
-                field="maxWeeklyDrawdown" 
-                min={2.0} 
-                max={20.0} 
-                step={0.5} 
-                unit="%" 
+              <SliderField
+                label="Weekly Drawdown Limit (%)"
+                field="maxWeeklyDrawdown"
+                min={2.0}
+                max={20.0}
+                step={0.5}
+                unit="%"
                 warn={15.0}
               />
-              <SliderField 
-                label="Monthly Drawdown Limit (%)" 
-                field="maxMonthlyDrawdown" 
-                min={5.0} 
-                max={30.0} 
-                step={1.0} 
-                unit="%" 
+              <SliderField
+                label="Monthly Drawdown Limit (%)"
+                field="maxMonthlyDrawdown"
+                min={5.0}
+                max={30.0}
+                step={1.0}
+                unit="%"
                 warn={20.0}
               />
             </div>
             <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
               <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">Auto-Shutdown on Daily Limit</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Halt all trading when daily loss limit is reached</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  Auto-Shutdown on Daily Limit
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Halt all trading when daily loss limit is reached
+                </p>
               </div>
               <Toggle field="dailyLossShutdown" />
             </div>
@@ -664,7 +746,9 @@ export default function RiskRulesPage() {
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Open Positions</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Max Open Positions
+                </label>
                 <select
                   value={rules.maxOpenPositions}
                   onChange={(e) => {
@@ -674,12 +758,16 @@ export default function RiskRulesPage() {
                   className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                 >
                   {[1, 2, 3, 4, 5, 6, 8, 10].map((v) => (
-                    <option key={v} value={v}>{v} position{v > 1 ? 's' : ''}</option>
+                    <option key={v} value={v}>
+                      {v} position{v > 1 ? 's' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Correlated Trades</label>
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                  Max Correlated Trades
+                </label>
                 <select
                   value={rules.maxCorrelatedTrades}
                   onChange={(e) => {
@@ -689,35 +777,41 @@ export default function RiskRulesPage() {
                   className="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
                 >
                   {[1, 2, 3, 4].map((v) => (
-                    <option key={v} value={v}>{v} trade{v > 1 ? 's' : ''}</option>
+                    <option key={v} value={v}>
+                      {v} trade{v > 1 ? 's' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
-              <SliderField 
-                label="Portfolio Heat Limit (% of capital)" 
-                field="portfolioHeatLimit" 
-                min={2.0} 
-                max={20.0} 
-                step={0.5} 
-                unit="%" 
+              <SliderField
+                label="Portfolio Heat Limit (% of capital)"
+                field="portfolioHeatLimit"
+                min={2.0}
+                max={20.0}
+                step={0.5}
+                unit="%"
                 warn={12.0}
                 description="Total risk exposure across all positions"
               />
-              <SliderField 
-                label="Emergency Exit Threshold (% of capital)" 
-                field="emergencyExitPct" 
-                min={1.0} 
-                max={8.0} 
-                step={0.5} 
-                unit="%" 
+              <SliderField
+                label="Emergency Exit Threshold (% of capital)"
+                field="emergencyExitPct"
+                min={1.0}
+                max={8.0}
+                step={0.5}
+                unit="%"
                 warn={6.0}
                 description="Close all positions when loss exceeds this threshold"
               />
             </div>
             <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
               <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">Correlation Check</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Block new entries when correlated positions exceed limit</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  Correlation Check
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Block new entries when correlated positions exceed limit
+                </p>
               </div>
               <Toggle field="correlationCheck" />
             </div>
@@ -732,37 +826,41 @@ export default function RiskRulesPage() {
               Stop Loss & Take Profit Configuration
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <SliderField 
-                label="ATR Multiplier (Stop Loss)" 
-                field="atrMultiplierSL" 
-                min={1.0} 
-                max={4.0} 
-                step={0.1} 
+              <SliderField
+                label="ATR Multiplier (Stop Loss)"
+                field="atrMultiplierSL"
+                min={1.0}
+                max={4.0}
+                step={0.1}
                 unit="x"
                 description="Multiplier applied to ATR for stop loss placement"
               />
-              <SliderField 
-                label="TP1 Risk:Reward Ratio" 
-                field="tp1Ratio" 
-                min={1.5} 
-                max={4.0} 
-                step={0.1} 
+              <SliderField
+                label="TP1 Risk:Reward Ratio"
+                field="tp1Ratio"
+                min={1.5}
+                max={4.0}
+                step={0.1}
                 unit="x"
                 description="First take profit level"
               />
-              <SliderField 
-                label="TP2 Risk:Reward Ratio" 
-                field="tp2Ratio" 
-                min={2.0} 
-                max={6.0} 
-                step={0.1} 
+              <SliderField
+                label="TP2 Risk:Reward Ratio"
+                field="tp2Ratio"
+                min={2.0}
+                max={6.0}
+                step={0.1}
                 unit="x"
                 description="Second take profit level"
               />
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">TP1 Position Close (%)</label>
-                  <span className="text-sm font-mono font-bold text-blue-600 dark:text-blue-400">{rules.tp1SizeClose}%</span>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    TP1 Position Close (%)
+                  </label>
+                  <span className="text-sm font-mono font-bold text-blue-600 dark:text-blue-400">
+                    {rules.tp1SizeClose}%
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -784,17 +882,19 @@ export default function RiskRulesPage() {
             <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
               <div>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">Trailing Stop</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Dynamic ATR-based trailing after TP1</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Dynamic ATR-based trailing after TP1
+                </p>
               </div>
               <Toggle field="trailingStopEnabled" />
             </div>
             {rules.trailingStopEnabled && (
-              <SliderField 
-                label="Trailing Stop ATR Multiplier" 
-                field="trailingStopATR" 
-                min={0.5} 
-                max={3.0} 
-                step={0.1} 
+              <SliderField
+                label="Trailing Stop ATR Multiplier"
+                field="trailingStopATR"
+                min={0.5}
+                max={3.0}
+                step={0.1}
                 unit="x"
                 description="ATR multiplier for trailing stop activation"
               />
@@ -810,11 +910,26 @@ export default function RiskRulesPage() {
               Advanced Risk Controls
             </h2>
             {[
-              { field: 'kellyEnabled' as keyof RiskRules, label: 'Kelly Criterion Sizing', desc: 'Dynamically size positions based on historical win-rate and R:R' },
-              { field: 'anomalyDetection' as keyof RiskRules, label: 'Anomaly Detection', desc: 'Pause trading on unusual price movements or volume spikes' },
-              { field: 'autoScaling' as keyof RiskRules, label: 'Auto-Scaling', desc: 'Reduce position size after consecutive losses' },
+              {
+                field: 'kellyEnabled' as keyof RiskRules,
+                label: 'Kelly Criterion Sizing',
+                desc: 'Dynamically size positions based on historical win-rate and R:R',
+              },
+              {
+                field: 'anomalyDetection' as keyof RiskRules,
+                label: 'Anomaly Detection',
+                desc: 'Pause trading on unusual price movements or volume spikes',
+              },
+              {
+                field: 'autoScaling' as keyof RiskRules,
+                label: 'Auto-Scaling',
+                desc: 'Reduce position size after consecutive losses',
+              },
             ].map(({ field, label, desc }) => (
-              <div key={field} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50">
+              <div
+                key={field}
+                className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50"
+              >
                 <div>
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{label}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{desc}</p>
@@ -824,34 +939,46 @@ export default function RiskRulesPage() {
             ))}
             {rules.kellyEnabled && (
               <div className="mt-2">
-                <SliderField 
-                  label="Kelly Fraction (conservative multiplier)" 
-                  field="kellyFraction" 
-                  min={0.1} 
-                  max={1.0} 
-                  step={0.05} 
+                <SliderField
+                  label="Kelly Fraction (conservative multiplier)"
+                  field="kellyFraction"
+                  min={0.1}
+                  max={1.0}
+                  step={0.05}
                   unit="x"
                   description="Fraction of Kelly optimal position size (0.25 = 25%)"
                 />
               </div>
             )}
-            
+
             <div className="mt-4 p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
               <h4 className="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
                 <Info size={14} /> Risk Assessment Summary
               </h4>
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Max Loss Per Trade: <span className="font-semibold text-gray-900 dark:text-white">${riskAssessment.maxLossPerTrade.toLocaleString()}</span>
+                  Max Loss Per Trade:{' '}
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    ${riskAssessment.maxLossPerTrade.toLocaleString()}
+                  </span>
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Daily Loss Limit: <span className="font-semibold text-gray-900 dark:text-white">${riskAssessment.dailyLossLimit.toLocaleString()}</span>
+                  Daily Loss Limit:{' '}
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    ${riskAssessment.dailyLossLimit.toLocaleString()}
+                  </span>
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Max Positions: <span className="font-semibold text-gray-900 dark:text-white">{rules.maxOpenPositions}</span>
+                  Max Positions:{' '}
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    {rules.maxOpenPositions}
+                  </span>
                 </div>
                 <div className="text-xs text-gray-600 dark:text-gray-400">
-                  Open Positions: <span className="font-semibold text-gray-900 dark:text-white">{riskAssessment.openPositions}</span>
+                  Open Positions:{' '}
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    {riskAssessment.openPositions}
+                  </span>
                 </div>
               </div>
             </div>

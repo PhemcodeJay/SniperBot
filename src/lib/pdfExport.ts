@@ -81,8 +81,8 @@ export function generatePDF(config: ExportConfig): void {
   }
 
   // Data table
-  const tableData = config.rows.map(row =>
-    config.columnMap.map(col => {
+  const tableData = config.rows.map((row) =>
+    config.columnMap.map((col) => {
       const val = row[col as string];
       if (val === null || val === undefined) return '-';
       if (typeof val === 'number') {
@@ -114,15 +114,15 @@ export function generatePDF(config: ExportConfig): void {
     },
     margin: { top: 10, bottom: 20 },
     pageBreak: 'auto',
-    didDrawPage: (data: any) => {
+    didDrawPage: (_data: any) => {
       // Footer
-      const pageCount = doc.internal.getNumberOfPages();
-      const page = data.pageNumber || doc.internal.getCurrentPageInfo().pageNumber;
+      const pageCount = (doc as any).getNumberOfPages();
+      const pageNumber = (doc as any).getCurrentPageInfo()?.pageNumber || 1;
       doc.setFontSize(7);
       doc.setTextColor(150);
       doc.text(
-        `SniperBot - ${config.title} - Page ${page} of ${pageCount}`,
-        data.settings.margin.left,
+        `SniperBot - ${config.title} - Page ${pageNumber} of ${pageCount}`,
+        10,
         doc.internal.pageSize.getHeight() - 10
       );
     },

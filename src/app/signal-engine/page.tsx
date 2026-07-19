@@ -5,15 +5,43 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { realtimeManager } from '@/lib/realtimeManager';
-import { BYBIT_BASE_URL, fetchBybitWalletBalance, getBybitCredentials, normalizeBybitQty, placeBybitOrder, safeJsonParse } from '@/lib/bybit';
-import { appendSharedAlert, setSharedSignals, setSharedTrades, subscribeToSharedTradingState, SharedSignal } from '@/lib/tradingState';
+import {
+  BYBIT_BASE_URL,
+  fetchBybitWalletBalance,
+  getBybitCredentials,
+  normalizeBybitQty,
+  placeBybitOrder,
+  safeJsonParse,
+} from '@/lib/bybit';
+import {
+  appendSharedAlert,
+  setSharedSignals,
+  setSharedTrades,
+  subscribeToSharedTradingState,
+  SharedSignal,
+} from '@/lib/tradingState';
 import { readLiveTrades, writeLiveTrades } from '@/lib/liveTrades';
 import { autoExecutor } from '@/lib/autoExecutor';
 import { getPaperState } from '@/lib/paperTrading';
-import { 
-  Zap, TrendingUp, TrendingDown, RefreshCw, ChevronDown, ChevronUp,
-  AlertCircle, CheckCircle, Clock, Filter, Search, X,
-  Sparkles, Wifi, WifiOff, Database, Activity, Loader2
+import {
+  Zap,
+  TrendingUp,
+  TrendingDown,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Filter,
+  Search,
+  X,
+  Sparkles,
+  Wifi,
+  WifiOff,
+  Database,
+  Activity,
+  Loader2,
 } from 'lucide-react';
 
 // Start auto-executor when bot starts (for paper mode signal execution)
@@ -26,10 +54,10 @@ useEffect(() => {
   const onBotStopped = () => {
     autoExecutor.stop();
   };
-  
+
   window.addEventListener('bot-started', onBotStarted);
   window.addEventListener('bot-stopped', onBotStopped);
-  
+
   return () => {
     window.removeEventListener('bot-started', onBotStarted);
     window.removeEventListener('bot-stopped', onBotStopped);
@@ -57,9 +85,21 @@ interface Indicator {
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const SUPPORTED_SYMBOLS = [
-  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
-  'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'DOGEUSDT',
+  'ADAUSDT',
+  'AVAXUSDT',
+  'LINKUSDT',
+  'DOTUSDT',
+  'MATICUSDT',
+  'LTCUSDT',
+  'NEARUSDT',
+  'APTUSDT',
+  'ARBUSDT',
 ];
 
 // Minimum time between WebSocket-triggered rescans. Ticker ticks can arrive
@@ -70,7 +110,6 @@ const MIN_RESCAN_INTERVAL_MS = 30000; // 30s minimum between rescans to reduce A
 
 // ============== API HELPERS ==============
 const getApiCredentials = () => getBybitCredentials();
-
 
 const formatPrice = (price: number): string => {
   if (price >= 1000) return price.toFixed(2);
@@ -83,22 +122,22 @@ const formatPrice = (price: number): string => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -107,13 +146,17 @@ const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => 
 };
 
 // Fetch kline data for technical indicators
-const fetchKline = async (symbol: string, interval: string = '15', limit: number = 100): Promise<any[]> => {
+const fetchKline = async (
+  symbol: string,
+  interval: string = '15',
+  limit: number = 100
+): Promise<any[]> => {
   try {
     const response = await fetch(
       `${BYBIT_BASE_URL}/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
     );
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0 && data?.result?.list) {
       return data.result.list;
     }
@@ -142,13 +185,17 @@ export default function SignalEnginePage() {
     { id: 'ema9', label: 'EMA 9', enabled: true, category: 'trend' },
     { id: 'ema20', label: 'EMA 20', enabled: true, category: 'trend' },
   ]);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'live' | 'pending' | 'rejected' | 'executed'>('all');
+  const [filterStatus, setFilterStatus] = useState<
+    'all' | 'live' | 'pending' | 'rejected' | 'executed'
+  >('all');
   const [filterSymbol, setFilterSymbol] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [showRejected, setShowRejected] = useState(true);
   const [sortBy, setSortBy] = useState<'confidence' | 'time' | 'rr'>('time');
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'disconnected' | 'connecting' | 'connected' | 'error'
+  >('connecting');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({ live: 0, pending: 0, rejected: 0, avgConfidence: 0 });
@@ -179,7 +226,13 @@ export default function SignalEnginePage() {
   const isScanningRef = useRef<boolean>(false);
 
   // Calculate technical indicators from kline data
-  const calculateIndicators = (klines: any[]): { rsi: number; macd: { signal: 'bullish' | 'bearish' | 'neutral' }; bb: { position: string } } => {
+  const calculateIndicators = (
+    klines: any[]
+  ): {
+    rsi: number;
+    macd: { signal: 'bullish' | 'bearish' | 'neutral' };
+    bb: { position: string };
+  } => {
     if (!klines || klines.length < 20) {
       return { rsi: 50, macd: { signal: 'neutral' }, bb: { position: 'middle' } };
     }
@@ -189,7 +242,8 @@ export default function SignalEnginePage() {
 
     // Calculate RSI using Wilder's smoothed method (period=14)
     const period = 14;
-    let avgGain = 0, avgLoss = 0;
+    let avgGain = 0,
+      avgLoss = 0;
     // First average: simple mean of first 14 periods
     for (let i = 1; i <= period && i < closes.length; i++) {
       const diff = closes[i] - closes[i - 1];
@@ -210,7 +264,7 @@ export default function SignalEnginePage() {
       }
     }
     const rs = avgLoss > 0 ? avgGain / avgLoss : 100;
-    const rsi = 100 - (100 / (1 + rs));
+    const rsi = 100 - 100 / (1 + rs);
 
     // Calculate MACD (simplified)
     const ema12 = closes.slice(-12).reduce((a, b) => a + b, 0) / Math.min(12, closes.length);
@@ -225,7 +279,7 @@ export default function SignalEnginePage() {
     const upper = mean + 2 * stdDev;
     const lower = mean - 2 * stdDev;
     const currentPrice = closes[closes.length - 1];
-    
+
     let bbPosition = 'middle';
     if (currentPrice > upper) bbPosition = 'upper';
     else if (currentPrice < lower) bbPosition = 'lower';
@@ -258,10 +312,12 @@ export default function SignalEnginePage() {
     const volumeFactor = Math.min(volume / 100000000, 2);
     const trendStrength = Math.abs(change24h) / 2;
     const rsiFactor = isLong ? (70 - indicators.rsi) / 70 : (indicators.rsi - 30) / 70;
-    const bbFactor = indicators.bb.position === 'upper' || indicators.bb.position === 'lower' ? 10 : 0;
+    const bbFactor =
+      indicators.bb.position === 'upper' || indicators.bb.position === 'lower' ? 10 : 0;
     const macdFactor = indicators.macd.signal !== 'neutral' ? 10 : 0;
-    
-    let confidence = 35 + (trendStrength * 8) + (volumeFactor * 8) + (rsiFactor * 12) + bbFactor + macdFactor;
+
+    let confidence =
+      35 + trendStrength * 8 + volumeFactor * 8 + rsiFactor * 12 + bbFactor + macdFactor;
     confidence = Math.min(98, Math.max(20, confidence));
 
     // Calculate stop loss and take profit levels
@@ -275,8 +331,8 @@ export default function SignalEnginePage() {
     const reward = Math.abs(takeProfit1 - entryPrice);
     const rr = risk > 0 ? reward / risk : 1.5;
 
-    const regime = Math.abs(change24h) > 3 ? 'trending' : 
-                   Math.abs(change24h) > 1.5 ? 'ranging' : 'volatile';
+    const regime =
+      Math.abs(change24h) > 3 ? 'trending' : Math.abs(change24h) > 1.5 ? 'ranging' : 'volatile';
     const timeframe = Math.abs(change24h) > 2 ? '15m' : '5m';
     const source = confidence > 80 ? 'hybrid' : confidence > 70 ? 'technical' : 'ml';
     const status = confidence > 80 ? 'live' : confidence > 70 ? 'pending' : 'rejected';
@@ -342,15 +398,17 @@ export default function SignalEnginePage() {
       );
       const newSignals = signalResults.filter((s): s is Signal => s !== null);
 
-      setSignals(prevSignals => {
+      setSignals((prevSignals) => {
         // Keep existing live/pending signals, add new ones
-      const existingActive = prevSignals.filter(s => s.status === 'live' || s.status === 'pending');
+        const existingActive = prevSignals.filter(
+          (s) => s.status === 'live' || s.status === 'pending'
+        );
 
         // Combine and deduplicate by symbol
         const combined = [...newSignals, ...existingActive];
-        const uniqueSignals = Array.from(
-          new Map(combined.map(s => [s.symbol, s])).values()
-        ).sort((a, b) => b.confidence - a.confidence) as Signal[];
+        const uniqueSignals = Array.from(new Map(combined.map((s) => [s.symbol, s])).values()).sort(
+          (a, b) => b.confidence - a.confidence
+        ) as Signal[];
 
         const merged = uniqueSignals.slice(0, 50);
         setSharedSignals(merged as any);
@@ -358,7 +416,6 @@ export default function SignalEnginePage() {
       });
 
       setLastUpdate(new Date());
-
     } catch (err: any) {
       console.error('Error fetching market data:', err);
       setError(err.message || 'Failed to fetch market data');
@@ -376,7 +433,7 @@ export default function SignalEnginePage() {
       try {
         const ticker = tick;
         if (ticker && ticker.symbol) {
-          setMarketData(prev => ({ ...prev, [ticker.symbol]: ticker }));
+          setMarketData((prev) => ({ ...prev, [ticker.symbol]: ticker }));
           const now = Date.now();
           if (now - lastScanRef.current >= MIN_RESCAN_INTERVAL_MS) {
             fetchMarketDataAndGenerateSignals();
@@ -388,7 +445,9 @@ export default function SignalEnginePage() {
     });
     // Mark connected once manager is running (manager logs/handles WS lifecycle)
     setConnectionStatus('connected');
-    return () => { unsubscribe(); };
+    return () => {
+      unsubscribe();
+    };
   }, [fetchMarketDataAndGenerateSignals]);
 
   const disconnectWebSocket = useCallback(() => {
@@ -424,7 +483,7 @@ export default function SignalEnginePage() {
       fetchMarketDataAndGenerateSignals();
     };
     window.addEventListener('bot-started', onBotStarted);
-    
+
     const onBotStopped = () => {
       // Stop auto-executor when bot stops
       autoExecutor.stop();
@@ -447,12 +506,14 @@ export default function SignalEnginePage() {
 
   // Update statistics
   useEffect(() => {
-    const live = signals.filter(s => s.status === 'live').length;
-    const pending = signals.filter(s => s.status === 'pending').length;
-    const rejected = signals.filter(s => s.status === 'rejected').length;
-    const avgConf = signals
-      .filter(s => s.status === 'live' || s.status === 'pending')
-      .reduce((sum, s) => sum + s.confidence, 0) / (live + pending) || 0;
+    const live = signals.filter((s) => s.status === 'live').length;
+    const pending = signals.filter((s) => s.status === 'pending').length;
+    const rejected = signals.filter((s) => s.status === 'rejected').length;
+    const avgConf =
+      signals
+        .filter((s) => s.status === 'live' || s.status === 'pending')
+        .reduce((sum, s) => sum + s.confidence, 0) /
+        (live + pending) || 0;
 
     setStats({ live, pending, rejected, avgConfidence: avgConf });
   }, [signals]);
@@ -462,7 +523,11 @@ export default function SignalEnginePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('auto_trading_enabled', String(autoTradingEnabled));
-      window.dispatchEvent(new CustomEvent('auto-trading-settings-changed', { detail: { enabled: autoTradingEnabled } }));
+      window.dispatchEvent(
+        new CustomEvent('auto-trading-settings-changed', {
+          detail: { enabled: autoTradingEnabled },
+        })
+      );
     }
   }, [autoTradingEnabled]);
 
@@ -481,13 +546,13 @@ export default function SignalEnginePage() {
   const handleRescan = async () => {
     setIsScanning(true);
     setError(null);
-    
+
     try {
       await fetchMarketDataAndGenerateSignals();
-      
+
       if (connectionStatus === 'disconnected' || connectionStatus === 'error') {
-          // Trigger singleton manager refresh instead of per-component reconnect
-          realtimeManager.triggerRefresh();
+        // Trigger singleton manager refresh instead of per-component reconnect
+        realtimeManager.triggerRefresh();
       }
     } catch (err: any) {
       setError(err.message || 'Failed to scan market');
@@ -508,7 +573,7 @@ export default function SignalEnginePage() {
 
       // Enforce global max concurrent live trades
       const MAX_CONCURRENT_LIVE = parseInt(process.env.NEXT_PUBLIC_MAX_CONCURRENT_LIVE || '10', 10);
-      const currentLive = readLiveTrades().filter(t => t.status === 'open').length;
+      const currentLive = readLiveTrades().filter((t) => t.status === 'open').length;
       if (currentLive >= MAX_CONCURRENT_LIVE) {
         throw new Error('Max concurrent live trades reached');
       }
@@ -517,7 +582,7 @@ export default function SignalEnginePage() {
       // Use a short-lived cache to avoid repeated /api/bybit calls during bursts.
       let available = 0;
       const now = Date.now();
-      if (walletCacheRef.current && (now - walletCacheRef.current.ts) < 60000) {
+      if (walletCacheRef.current && now - walletCacheRef.current.ts < 60000) {
         available = walletCacheRef.current.available;
       } else {
         const wallet = await fetchBybitWalletBalance(apiKey, apiSecret);
@@ -566,37 +631,40 @@ export default function SignalEnginePage() {
       }
 
       const liveTrades = readLiveTrades();
-      writeLiveTrades([...liveTrades, {
-        id: `live-${signal.id}`,
-        symbol: signal.symbol,
-        side: signal.direction,
-        entryPrice: signal.entryPrice,
-        exitPrice: signal.entryPrice,
-        size: normalizedQty,
-        pnl: 0,
-        pnlPct: 0,
-        confidence: signal.confidence,
-        regime: signal.regime,
-        entryTime: new Date().toLocaleString(),
-        exitTime: new Date().toLocaleString(),
-        duration: '0m',
-        exitReason: 'Live order placed',
-        slippage: 0,
-        entryTimestamp: Date.now(),
-        exitTimestamp: Date.now(),
-        status: 'open',
-        leverage,
-        liquidationPrice: signal.entryPrice * 0.95,
-        source: 'live',
-        orderId: orderResult.orderId,
-      }] );
+      writeLiveTrades([
+        ...liveTrades,
+        {
+          id: `live-${signal.id}`,
+          symbol: signal.symbol,
+          side: signal.direction,
+          entryPrice: signal.entryPrice,
+          exitPrice: signal.entryPrice,
+          size: normalizedQty,
+          pnl: 0,
+          pnlPct: 0,
+          confidence: signal.confidence,
+          regime: signal.regime,
+          entryTime: new Date().toLocaleString(),
+          exitTime: new Date().toLocaleString(),
+          duration: '0m',
+          exitReason: 'Live order placed',
+          slippage: 0,
+          entryTimestamp: Date.now(),
+          exitTimestamp: Date.now(),
+          status: 'open',
+          leverage,
+          liquidationPrice: signal.entryPrice * 0.95,
+          source: 'live',
+          orderId: orderResult.orderId,
+        },
+      ]);
 
       appendSharedAlert({
         id: `alert-live-order-${signal.id}-${Date.now()}`,
         type: 'trade',
         priority: 'high',
         title: 'Live order executed',
-        message: `Bybit order ${orderResult.orderId} placed for ${signal.symbol} ${signal.direction}.`, 
+        message: `Bybit order ${orderResult.orderId} placed for ${signal.symbol} ${signal.direction}.`,
         time: new Date().toLocaleTimeString(),
         read: false,
         timestamp: Date.now(),
@@ -604,7 +672,9 @@ export default function SignalEnginePage() {
         price: signal.entryPrice,
       });
 
-      setSignals(prev => prev.map(s => s.id === signal.id ? { ...s, status: 'executed' } : s));
+      setSignals((prev) =>
+        prev.map((s) => (s.id === signal.id ? { ...s, status: 'executed' } : s))
+      );
     } catch (err: any) {
       console.error('Signal execution failed:', err);
       setError(err.message || 'Failed to execute signal');
@@ -615,49 +685,67 @@ export default function SignalEnginePage() {
 
   const handleDeleteSignal = (id: string) => {
     if (!confirm('Delete this signal?')) return;
-    setSignals(prev => prev.filter(s => s.id !== id));
+    setSignals((prev) => prev.filter((s) => s.id !== id));
   };
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
-      case 'connected': return <Wifi size={14} className="text-green-500" />;
-      case 'connecting': return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
-      case 'error': return <WifiOff size={14} className="text-red-500" />;
-      default: return <WifiOff size={14} className="text-gray-500" />;
+      case 'connected':
+        return <Wifi size={14} className="text-green-500" />;
+      case 'connecting':
+        return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
+      case 'error':
+        return <WifiOff size={14} className="text-red-500" />;
+      default:
+        return <WifiOff size={14} className="text-gray-500" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'live': return 'bg-green-500';
-      case 'pending': return 'bg-yellow-500';
-      case 'rejected': return 'bg-red-500';
-      case 'executed': return 'bg-blue-500';
-      default: return 'bg-gray-500';
+      case 'live':
+        return 'bg-green-500';
+      case 'pending':
+        return 'bg-yellow-500';
+      case 'rejected':
+        return 'bg-red-500';
+      case 'executed':
+        return 'bg-blue-500';
+      default:
+        return 'bg-gray-500';
     }
   };
 
   const getStatusTextColor = (status: string) => {
     switch (status) {
-      case 'live': return 'text-green-600 dark:text-green-400';
-      case 'pending': return 'text-yellow-600 dark:text-yellow-400';
-      case 'rejected': return 'text-red-600 dark:text-red-400';
-      case 'executed': return 'text-blue-600 dark:text-blue-400';
-      default: return 'text-gray-600 dark:text-gray-400';
+      case 'live':
+        return 'text-green-600 dark:text-green-400';
+      case 'pending':
+        return 'text-yellow-600 dark:text-yellow-400';
+      case 'rejected':
+        return 'text-red-600 dark:text-red-400';
+      case 'executed':
+        return 'text-blue-600 dark:text-blue-400';
+      default:
+        return 'text-gray-600 dark:text-gray-400';
     }
   };
 
   // Filtered and sorted signals
   const filtered = signals
-    .filter(s => filterStatus === 'all' || s.status === filterStatus)
-    .filter(s => showRejected || s.status !== 'rejected')
-    .filter(s => s.symbol.toLowerCase().includes(filterSymbol.toLowerCase()))
+    .filter((s) => filterStatus === 'all' || s.status === filterStatus)
+    .filter((s) => showRejected || s.status !== 'rejected')
+    .filter((s) => s.symbol.toLowerCase().includes(filterSymbol.toLowerCase()))
     .sort((a, b) => {
       switch (sortBy) {
-        case 'confidence': return b.confidence - a.confidence;
-        case 'rr': return b.rr - a.rr;
-        case 'time': return (b.timestamp || 0) - (a.timestamp || 0);
-        default: return 0;
+        case 'confidence':
+          return b.confidence - a.confidence;
+        case 'rr':
+          return b.rr - a.rr;
+        case 'time':
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        default:
+          return 0;
       }
     });
 
@@ -668,12 +756,12 @@ export default function SignalEnginePage() {
           <div className="animate-pulse space-y-4">
             <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded" />
             <div className="grid grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(i => (
+              {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="h-20 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
             <div className="grid grid-cols-3 gap-4">
-              {[1, 2, 3].map(i => (
+              {[1, 2, 3].map((i) => (
                 <div key={i} className="h-64 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
@@ -698,14 +786,22 @@ export default function SignalEnginePage() {
                 AI-powered signal generation from live Bybit data
                 <span className="flex items-center gap-1 text-xs">
                   {getConnectionIcon()}
-                  <span className={`capitalize ${
-                    connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
-                    connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
-                    'text-gray-500 dark:text-gray-400'
-                  }`}>
-                    {connectionStatus === 'connected' ? 'Live' : 
-                     connectionStatus === 'connecting' ? 'Connecting...' :
-                     connectionStatus === 'error' ? 'Error' : 'Disconnected'}
+                  <span
+                    className={`capitalize ${
+                      connectionStatus === 'connected'
+                        ? 'text-green-600 dark:text-green-400'
+                        : connectionStatus === 'error'
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    {connectionStatus === 'connected'
+                      ? 'Live'
+                      : connectionStatus === 'connecting'
+                        ? 'Connecting...'
+                        : connectionStatus === 'error'
+                          ? 'Error'
+                          : 'Disconnected'}
                   </span>
                 </span>
               </p>
@@ -714,7 +810,9 @@ export default function SignalEnginePage() {
           <div className="flex items-center gap-3">
             {connectionStatus === 'error' && (
               <button
-                onClick={() => { realtimeManager.triggerRefresh(); }}
+                onClick={() => {
+                  realtimeManager.triggerRefresh();
+                }}
                 className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
               >
                 Reconnect
@@ -748,13 +846,36 @@ export default function SignalEnginePage() {
         {/* Stats Row */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           {[
-            { label: 'Live Signals', value: stats.live.toString(), color: 'text-green-600 dark:text-green-400' },
-            { label: 'Pending Signals', value: stats.pending.toString(), color: 'text-yellow-600 dark:text-yellow-400' },
-            { label: 'Rejected', value: stats.rejected.toString(), color: 'text-red-600 dark:text-red-400' },
-            { label: 'Avg Confidence', value: `${stats.avgConfidence.toFixed(0)}%`, color: 'text-blue-600 dark:text-blue-400' },
-            { label: 'Total Signals', value: signals.length.toString(), color: 'text-purple-600 dark:text-purple-400' },
+            {
+              label: 'Live Signals',
+              value: stats.live.toString(),
+              color: 'text-green-600 dark:text-green-400',
+            },
+            {
+              label: 'Pending Signals',
+              value: stats.pending.toString(),
+              color: 'text-yellow-600 dark:text-yellow-400',
+            },
+            {
+              label: 'Rejected',
+              value: stats.rejected.toString(),
+              color: 'text-red-600 dark:text-red-400',
+            },
+            {
+              label: 'Avg Confidence',
+              value: `${stats.avgConfidence.toFixed(0)}%`,
+              color: 'text-blue-600 dark:text-blue-400',
+            },
+            {
+              label: 'Total Signals',
+              value: signals.length.toString(),
+              color: 'text-purple-600 dark:text-purple-400',
+            },
           ].map((stat) => (
-            <div key={stat.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+            <div
+              key={stat.label}
+              className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3"
+            >
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{stat.label}</p>
               <p className={`text-lg font-bold font-mono ${stat.color}`}>{stat.value}</p>
             </div>
@@ -772,12 +893,12 @@ export default function SignalEnginePage() {
                     key={f}
                     onClick={() => setFilterStatus(f)}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-lg capitalize transition-colors ${
-                      filterStatus === f 
-                        ? 'bg-blue-600 text-white' 
+                      filterStatus === f
+                        ? 'bg-blue-600 text-white'
                         : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                     }`}
                   >
-                    {f} {f !== 'all' && `(${signals.filter(s => s.status === f).length})`}
+                    {f} {f !== 'all' && `(${signals.filter((s) => s.status === f).length})`}
                   </button>
                 ))}
               </div>
@@ -790,7 +911,10 @@ export default function SignalEnginePage() {
                     placeholder="Filter symbol..."
                     className="pl-8 pr-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
-                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Search
+                    size={12}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
                 </div>
                 <select
                   value={sortBy}
@@ -822,7 +946,9 @@ export default function SignalEnginePage() {
                   {connectionStatus === 'connected' ? (
                     <p className="text-xs mt-1 text-gray-400">Analyzing market data...</p>
                   ) : (
-                    <p className="text-xs mt-1 text-gray-400">Connect to WebSocket to receive live signals</p>
+                    <p className="text-xs mt-1 text-gray-400">
+                      Connect to WebSocket to receive live signals
+                    </p>
                   )}
                 </div>
               ) : (
@@ -830,28 +956,41 @@ export default function SignalEnginePage() {
                   const isExpanded = expandedId === signal.id;
                   const statusColors = {
                     live: 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/20',
-                    pending: 'border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/20',
-                    rejected: 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 opacity-70',
+                    pending:
+                      'border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/20',
+                    rejected:
+                      'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 opacity-70',
                     executed: 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20',
                   };
-                  
+
                   return (
-                    <div key={signal.id} className={`border rounded-lg overflow-hidden transition-all ${statusColors[signal.status]}`}>
+                    <div
+                      key={signal.id}
+                      className={`border rounded-lg overflow-hidden transition-all ${statusColors[signal.status]}`}
+                    >
                       <div className="p-4">
                         <div className="flex items-start justify-between gap-3">
                           <button
                             onClick={() => setExpandedId(isExpanded ? null : signal.id)}
                             className="flex-1 flex items-center gap-3 text-left min-w-0"
                           >
-                            <div className={`p-1.5 rounded-lg shrink-0 ${
-                              signal.direction === 'LONG' 
-                                ? 'bg-green-100 dark:bg-green-900/30' 
-                                : 'bg-red-100 dark:bg-red-900/30'
-                            }`}>
+                            <div
+                              className={`p-1.5 rounded-lg shrink-0 ${
+                                signal.direction === 'LONG'
+                                  ? 'bg-green-100 dark:bg-green-900/30'
+                                  : 'bg-red-100 dark:bg-red-900/30'
+                              }`}
+                            >
                               {signal.direction === 'LONG' ? (
-                                <TrendingUp size={14} className="text-green-600 dark:text-green-400" />
+                                <TrendingUp
+                                  size={14}
+                                  className="text-green-600 dark:text-green-400"
+                                />
                               ) : (
-                                <TrendingDown size={14} className="text-red-600 dark:text-red-400" />
+                                <TrendingDown
+                                  size={14}
+                                  className="text-red-600 dark:text-red-400"
+                                />
                               )}
                             </div>
                             <div className="flex-1 min-w-0">
@@ -859,11 +998,13 @@ export default function SignalEnginePage() {
                                 <span className="text-sm font-bold text-gray-900 dark:text-white">
                                   {signal.symbol}
                                 </span>
-                                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
-                                  signal.direction === 'LONG' 
-                                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                                }`}>
+                                <span
+                                  className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                                    signal.direction === 'LONG'
+                                      ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                      : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                                  }`}
+                                >
                                   {signal.direction}
                                 </span>
                                 <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
@@ -873,10 +1014,15 @@ export default function SignalEnginePage() {
                                   {signal.signalSource}
                                 </span>
                                 <span className="text-[10px] px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300">
-                                  {signal.change24h > 0 ? '+' : ''}{signal.change24h.toFixed(1)}%
+                                  {signal.change24h > 0 ? '+' : ''}
+                                  {signal.change24h.toFixed(1)}%
                                 </span>
-                                <div className={`ml-auto flex items-center gap-1.5 ${getStatusTextColor(signal.status)}`}>
-                                  <div className={`w-1.5 h-1.5 rounded-full ${getStatusColor(signal.status)}`} />
+                                <div
+                                  className={`ml-auto flex items-center gap-1.5 ${getStatusTextColor(signal.status)}`}
+                                >
+                                  <div
+                                    className={`w-1.5 h-1.5 rounded-full ${getStatusColor(signal.status)}`}
+                                  />
                                   <span className="text-xs font-medium capitalize">
                                     {signal.status}
                                   </span>
@@ -884,16 +1030,26 @@ export default function SignalEnginePage() {
                               </div>
                               <div className="flex items-center gap-3 mt-1 flex-wrap">
                                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                                  Entry: <span className="font-mono text-gray-900 dark:text-white">${formatPrice(signal.entryPrice)}</span>
+                                  Entry:{' '}
+                                  <span className="font-mono text-gray-900 dark:text-white">
+                                    ${formatPrice(signal.entryPrice)}
+                                  </span>
                                 </span>
                                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                                  R:R <span className="font-mono text-gray-900 dark:text-white">1:{signal.rr}</span>
+                                  R:R{' '}
+                                  <span className="font-mono text-gray-900 dark:text-white">
+                                    1:{signal.rr}
+                                  </span>
                                 </span>
-                                <span className={`text-xs font-bold ${
-                                  signal.confidence >= 85 ? 'text-green-600 dark:text-green-400' : 
-                                  signal.confidence >= 75 ? 'text-yellow-600 dark:text-yellow-400' : 
-                                  'text-gray-500 dark:text-gray-400'
-                                }`}>
+                                <span
+                                  className={`text-xs font-bold ${
+                                    signal.confidence >= 85
+                                      ? 'text-green-600 dark:text-green-400'
+                                      : signal.confidence >= 75
+                                        ? 'text-yellow-600 dark:text-yellow-400'
+                                        : 'text-gray-500 dark:text-gray-400'
+                                  }`}
+                                >
                                   {signal.confidence}% conf
                                 </span>
                                 <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">
@@ -909,7 +1065,11 @@ export default function SignalEnginePage() {
                                 disabled={executingSignalId === signal.id}
                                 className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
                               >
-                                {executingSignalId === signal.id ? <Loader2 size={12} className="animate-spin" /> : 'Live'}
+                                {executingSignalId === signal.id ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  'Live'
+                                )}
                               </button>
                             )}
                             <button
@@ -938,12 +1098,29 @@ export default function SignalEnginePage() {
                             )}
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                               {[
-                                { label: 'Stop Loss', value: `$${formatPrice(signal.sl)}`, color: 'text-red-600 dark:text-red-400' },
-                                { label: 'TP1', value: `$${formatPrice(signal.tp1)}`, color: 'text-green-600 dark:text-green-400' },
-                                { label: 'TP2', value: `$${formatPrice(signal.tp2)}`, color: 'text-green-600 dark:text-green-400' },
+                                {
+                                  label: 'Stop Loss',
+                                  value: `$${formatPrice(signal.sl)}`,
+                                  color: 'text-red-600 dark:text-red-400',
+                                },
+                                {
+                                  label: 'TP1',
+                                  value: `$${formatPrice(signal.tp1)}`,
+                                  color: 'text-green-600 dark:text-green-400',
+                                },
+                                {
+                                  label: 'TP2',
+                                  value: `$${formatPrice(signal.tp2)}`,
+                                  color: 'text-green-600 dark:text-green-400',
+                                },
                               ].map(({ label, value, color }) => (
-                                <div key={label} className="bg-gray-50 dark:bg-gray-800/50 rounded p-2 text-center">
-                                  <p className="text-[10px] text-gray-500 dark:text-gray-400">{label}</p>
+                                <div
+                                  key={label}
+                                  className="bg-gray-50 dark:bg-gray-800/50 rounded p-2 text-center"
+                                >
+                                  <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    {label}
+                                  </p>
                                   <p className={`text-xs font-mono font-bold ${color}`}>{value}</p>
                                 </div>
                               ))}
@@ -951,36 +1128,63 @@ export default function SignalEnginePage() {
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                               <div className="flex justify-between">
                                 <span className="text-gray-500 dark:text-gray-400">Regime:</span>
-                                <span className="font-medium text-gray-900 dark:text-white capitalize">{signal.regime}</span>
+                                <span className="font-medium text-gray-900 dark:text-white capitalize">
+                                  {signal.regime}
+                                </span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-gray-500 dark:text-gray-400">Volume Spike:</span>
-                                <span className="font-medium text-gray-900 dark:text-white">{signal.volumeSpike.toFixed(1)}x</span>
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  Volume Spike:
+                                </span>
+                                <span className="font-medium text-gray-900 dark:text-white">
+                                  {signal.volumeSpike.toFixed(1)}x
+                                </span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-500 dark:text-gray-400">RSI:</span>
-                                <span className={`font-medium ${
-                                  signal.rsi > 70 ? 'text-red-600 dark:text-red-400' : 
-                                  signal.rsi < 30 ? 'text-green-600 dark:text-green-400' : 
-                                  'text-gray-900 dark:text-white'
-                                }`}>{signal.rsi}</span>
+                                <span
+                                  className={`font-medium ${
+                                    signal.rsi > 70
+                                      ? 'text-red-600 dark:text-red-400'
+                                      : signal.rsi < 30
+                                        ? 'text-green-600 dark:text-green-400'
+                                        : 'text-gray-900 dark:text-white'
+                                  }`}
+                                >
+                                  {signal.rsi}
+                                </span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-500 dark:text-gray-400">MACD:</span>
-                                <span className={`font-medium capitalize ${
-                                  signal.macdSignal === 'bullish' ? 'text-green-600 dark:text-green-400' : 
-                                  signal.macdSignal === 'bearish' ? 'text-red-600 dark:text-red-400' : 
-                                  'text-gray-500 dark:text-gray-400'
-                                }`}>{signal.macdSignal}</span>
+                                <span
+                                  className={`font-medium capitalize ${
+                                    signal.macdSignal === 'bullish'
+                                      ? 'text-green-600 dark:text-green-400'
+                                      : signal.macdSignal === 'bearish'
+                                        ? 'text-red-600 dark:text-red-400'
+                                        : 'text-gray-500 dark:text-gray-400'
+                                  }`}
+                                >
+                                  {signal.macdSignal}
+                                </span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-gray-500 dark:text-gray-400">BB Position:</span>
-                                <span className="font-medium text-gray-900 dark:text-white capitalize">{signal.bbPosition}</span>
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  BB Position:
+                                </span>
+                                <span className="font-medium text-gray-900 dark:text-white capitalize">
+                                  {signal.bbPosition}
+                                </span>
                               </div>
                               <div className="flex justify-between">
-                                <span className="text-gray-500 dark:text-gray-400">24h Change:</span>
-                                <span className={`font-medium ${signal.change24h > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  {signal.change24h > 0 ? '+' : ''}{signal.change24h.toFixed(1)}%
+                                <span className="text-gray-500 dark:text-gray-400">
+                                  24h Change:
+                                </span>
+                                <span
+                                  className={`font-medium ${signal.change24h > 0 ? 'text-green-600' : 'text-red-600'}`}
+                                >
+                                  {signal.change24h > 0 ? '+' : ''}
+                                  {signal.change24h.toFixed(1)}%
                                 </span>
                               </div>
                             </div>
@@ -1002,13 +1206,15 @@ export default function SignalEnginePage() {
                 <Sparkles size={14} className="text-blue-600 dark:text-blue-400" />
                 Active Indicators
                 <span className="ml-auto text-xs text-gray-500 dark:text-gray-400">
-                  {indicators.filter(i => i.enabled).length}/{indicators.length}
+                  {indicators.filter((i) => i.enabled).length}/{indicators.length}
                 </span>
               </h3>
               <div className="space-y-2">
                 {indicators.map((ind) => (
                   <div key={ind.id} className="flex items-center justify-between py-1">
-                    <span className={`text-xs ${ind.enabled ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-600'}`}>
+                    <span
+                      className={`text-xs ${ind.enabled ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-600'}`}
+                    >
                       {ind.label}
                     </span>
                     <span className={`text-xs ${ind.enabled ? 'text-green-500' : 'text-gray-400'}`}>
@@ -1028,24 +1234,36 @@ export default function SignalEnginePage() {
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Status</span>
-                  <span className={`font-medium flex items-center gap-1 ${
-                    connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
-                    connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
-                    'text-yellow-600 dark:text-yellow-400'
-                  }`}>
+                  <span
+                    className={`font-medium flex items-center gap-1 ${
+                      connectionStatus === 'connected'
+                        ? 'text-green-600 dark:text-green-400'
+                        : connectionStatus === 'error'
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-yellow-600 dark:text-yellow-400'
+                    }`}
+                  >
                     {getConnectionIcon()}
-                    {connectionStatus === 'connected' ? 'Live' : 
-                     connectionStatus === 'connecting' ? 'Connecting...' :
-                     connectionStatus === 'error' ? 'Error' : 'Disconnected'}
+                    {connectionStatus === 'connected'
+                      ? 'Live'
+                      : connectionStatus === 'connecting'
+                        ? 'Connecting...'
+                        : connectionStatus === 'error'
+                          ? 'Error'
+                          : 'Disconnected'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Total Signals</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{signals.length}</span>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {signals.length}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Symbols Tracked</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{SUPPORTED_SYMBOLS.length}</span>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {SUPPORTED_SYMBOLS.length}
+                  </span>
                 </div>
                 <div className="flex justify-between pt-1 border-t border-gray-200 dark:border-gray-700">
                   <span className="text-gray-500 dark:text-gray-400">Data Source</span>
@@ -1058,23 +1276,33 @@ export default function SignalEnginePage() {
 
             {/* Signal Summary */}
             <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Signal Summary</h3>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
+                Signal Summary
+              </h3>
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Live</span>
-                  <span className="font-medium text-green-600 dark:text-green-400">{stats.live}</span>
+                  <span className="font-medium text-green-600 dark:text-green-400">
+                    {stats.live}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Pending</span>
-                  <span className="font-medium text-yellow-600 dark:text-yellow-400">{stats.pending}</span>
+                  <span className="font-medium text-yellow-600 dark:text-yellow-400">
+                    {stats.pending}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-gray-400">Rejected</span>
-                  <span className="font-medium text-red-600 dark:text-red-400">{stats.rejected}</span>
+                  <span className="font-medium text-red-600 dark:text-red-400">
+                    {stats.rejected}
+                  </span>
                 </div>
                 <div className="flex justify-between pt-1 border-t border-gray-200 dark:border-gray-700">
                   <span className="text-gray-500 dark:text-gray-400">Avg Confidence</span>
-                  <span className="font-medium text-blue-600 dark:text-blue-400">{stats.avgConfidence.toFixed(0)}%</span>
+                  <span className="font-medium text-blue-600 dark:text-blue-400">
+                    {stats.avgConfidence.toFixed(0)}%
+                  </span>
                 </div>
               </div>
             </div>

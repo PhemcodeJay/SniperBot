@@ -44,10 +44,7 @@ export default function ConfirmModal({
       aria-labelledby="modal-title"
     >
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onCancel}
-      />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
 
       {/* Modal */}
       <div className="relative card-surface w-full max-w-md p-6 shadow-2xl fade-in">
@@ -67,21 +64,14 @@ export default function ConfirmModal({
           >
             <AlertTriangle
               size={20}
-              className={
-                variant === 'danger' ? 'text-negative' : 'text-warning'
-              }
+              className={variant === 'danger' ? 'text-negative' : 'text-warning'}
             />
           </div>
           <div className="flex-1">
-            <h2
-              id="modal-title"
-              className="text-base font-semibold text-foreground mb-1"
-            >
+            <h2 id="modal-title" className="text-base font-semibold text-foreground mb-1">
               {title}
             </h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {description}
-            </p>
+            <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
           </div>
         </div>
 
@@ -97,7 +87,9 @@ export default function ConfirmModal({
             className={`
               px-4 py-2 rounded-md text-sm font-semibold transition-all duration-150 active:scale-95
               ${
-                variant === 'danger' ?'bg-negative text-white hover:bg-negative/90' :'bg-warning text-black hover:bg-warning/90'
+                variant === 'danger'
+                  ? 'bg-negative text-white hover:bg-negative/90'
+                  : 'bg-warning text-black hover:bg-warning/90'
               }
             `}
           >

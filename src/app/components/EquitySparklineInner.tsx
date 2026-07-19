@@ -44,7 +44,12 @@ const getApiCredentials = () => {
   };
 };
 
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+const generateSignature = (
+  apiSecret: string,
+  timestamp: string,
+  recvWindow: string,
+  params: string
+) => {
   const crypto = require('crypto');
   const paramStr = timestamp + apiSecret + recvWindow + params;
   return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
@@ -63,7 +68,11 @@ const safeJsonParse = async (response: Response) => {
 // ============== API FUNCTIONS ==============
 
 // Fetch kline data
-const fetchKline = async (symbol: string = 'BTCUSDT', interval: string = '240', limit: number = 30): Promise<any[]> => {
+const fetchKline = async (
+  symbol: string = 'BTCUSDT',
+  interval: string = '240',
+  limit: number = 30
+): Promise<any[]> => {
   try {
     const response = await fetch(
       `${BYBIT_BASE_URL}/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
@@ -127,9 +136,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       <p className={pnl >= 0 ? 'text-positive' : 'text-negative'}>
         Net P&L: {pnl >= 0 ? '+' : ''}${pnl.toFixed(0)}
       </p>
-      {d.drawdown < 0 && (
-        <p className="text-negative">DD: {d.drawdown.toFixed(2)}%</p>
-      )}
+      {d.drawdown < 0 && <p className="text-negative">DD: {d.drawdown.toFixed(2)}%</p>}
     </div>
   );
 };
@@ -146,7 +153,9 @@ export default function EquityCurveChartInner() {
     maxDrawdown: 0,
     peakEquity: BASE_EQUITY,
   });
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connected' | 'disconnected' | 'connecting'
+  >('connecting');
   const [accountInfo, setAccountInfo] = useState<{ uid: string; accountType: string } | null>(null);
   const [liveBalance, setLiveBalance] = useState<number>(BASE_EQUITY);
   const [isLiveMode, setIsLiveMode] = useState(false);
@@ -217,7 +226,7 @@ export default function EquityCurveChartInner() {
 
       const equityData: EquityPoint[] = klines.map((k: any) => {
         const close = parseFloat(k[4]);
-        const priceChange = ((close - startPrice) / startPrice);
+        const priceChange = (close - startPrice) / startPrice;
         const equity = baseEquity * (1 + priceChange * 0.5);
 
         if (equity > peakEquity) peakEquity = equity;
@@ -273,7 +282,9 @@ export default function EquityCurveChartInner() {
 
   // Subscribe to singleton ticks instead of creating a dedicated WebSocket
 
-  const disconnectWebSocket = () => { /* noop - handled by realtimeManager */ };
+  const disconnectWebSocket = () => {
+    /* noop - handled by realtimeManager */
+  };
 
   useEffect(() => {
     fetchData();
@@ -314,7 +325,10 @@ export default function EquityCurveChartInner() {
         <div className="flex items-center gap-3 text-negative">
           <AlertCircle size={20} />
           <span className="text-sm">{error}</span>
-          <button onClick={fetchData} className="ml-auto text-xs font-medium text-primary hover:underline">
+          <button
+            onClick={fetchData}
+            className="ml-auto text-xs font-medium text-primary hover:underline"
+          >
             Retry
           </button>
         </div>
@@ -340,14 +354,22 @@ export default function EquityCurveChartInner() {
           <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
             Based on BTC price action · {data.length} data points
             <span className="flex items-center gap-1 text-[10px]">
-              <span className={connectionStatus === 'connected' ? 'text-green-500' : 'text-gray-400'}>●</span>
+              <span
+                className={connectionStatus === 'connected' ? 'text-green-500' : 'text-gray-400'}
+              >
+                ●
+              </span>
               {connectionStatus === 'connected' ? 'Live' : 'Offline'}
             </span>
             {accountInfo && (
-              <span className="text-[10px] text-muted-foreground">· {accountInfo.accountType} Account</span>
+              <span className="text-[10px] text-muted-foreground">
+                · {accountInfo.accountType} Account
+              </span>
             )}
             {isLiveMode && (
-              <span className="text-[10px] text-green-600 dark:text-green-400">· Live Balance: ${liveBalance.toFixed(2)}</span>
+              <span className="text-[10px] text-green-600 dark:text-green-400">
+                · Live Balance: ${liveBalance.toFixed(2)}
+              </span>
             )}
           </p>
         </div>
@@ -356,7 +378,9 @@ export default function EquityCurveChartInner() {
             <button
               onClick={() => setShowDrawdown(false)}
               className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all duration-150 ${
-                !showDrawdown ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                !showDrawdown
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Equity
@@ -364,7 +388,9 @@ export default function EquityCurveChartInner() {
             <button
               onClick={() => setShowDrawdown(true)}
               className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all duration-150 ${
-                showDrawdown ? 'bg-negative-subtle text-negative' : 'text-muted-foreground hover:text-foreground'
+                showDrawdown
+                  ? 'bg-negative-subtle text-negative'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Drawdown
@@ -372,8 +398,11 @@ export default function EquityCurveChartInner() {
           </div>
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Total Return</p>
-            <p className={`text-sm font-bold font-tabular ${stats.totalReturn >= 0 ? 'text-positive' : 'text-negative'}`}>
-              {stats.totalReturn >= 0 ? '+' : ''}{stats.totalReturn.toFixed(2)}%
+            <p
+              className={`text-sm font-bold font-tabular ${stats.totalReturn >= 0 ? 'text-positive' : 'text-negative'}`}
+            >
+              {stats.totalReturn >= 0 ? '+' : ''}
+              {stats.totalReturn.toFixed(2)}%
             </p>
           </div>
         </div>
@@ -392,17 +421,31 @@ export default function EquityCurveChartInner() {
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-          <XAxis dataKey="date" tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }} axisLine={false} tickLine={false} interval={4} />
+          <XAxis
+            dataKey="date"
+            tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            interval={4}
+          />
           <YAxis
             dataKey={showDrawdown ? 'drawdown' : 'equity'}
             tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v) => showDrawdown ? `${v.toFixed(1)}%` : `$${(v / 1000).toFixed(1)}k`}
+            tickFormatter={(v) =>
+              showDrawdown ? `${v.toFixed(1)}%` : `$${(v / 1000).toFixed(1)}k`
+            }
             width={52}
           />
           <Tooltip content={<CustomTooltip />} />
-          <ReferenceLine y={stats.startEquity} stroke="var(--muted-foreground)" strokeDasharray="4 4" strokeOpacity={0.4} label={{ value: 'Start', fill: 'var(--muted-foreground)', fontSize: 10 }} />
+          <ReferenceLine
+            y={stats.startEquity}
+            stroke="var(--muted-foreground)"
+            strokeDasharray="4 4"
+            strokeOpacity={0.4}
+            label={{ value: 'Start', fill: 'var(--muted-foreground)', fontSize: 10 }}
+          />
           <Area
             type="monotone"
             dataKey={showDrawdown ? 'drawdown' : 'equity'}
@@ -410,17 +453,35 @@ export default function EquityCurveChartInner() {
             strokeWidth={2}
             fill={showDrawdown ? 'url(#drawdownGrad)' : 'url(#equityCurveGrad)'}
             dot={false}
-            activeDot={{ r: 4, fill: showDrawdown ? 'var(--negative)' : 'var(--primary)', stroke: 'var(--card)', strokeWidth: 2 }}
+            activeDot={{
+              r: 4,
+              fill: showDrawdown ? 'var(--negative)' : 'var(--primary)',
+              stroke: 'var(--card)',
+              strokeWidth: 2,
+            }}
           />
         </AreaChart>
       </ResponsiveContainer>
 
       <div className="mt-3 pt-3 border-t border-border">
         <div className="flex justify-between text-[10px] text-muted-foreground">
-          <span>Start: <span className="text-foreground font-mono">${stats.startEquity.toLocaleString()}</span></span>
-          <span>Current: <span className="text-foreground font-mono">${stats.currentEquity.toLocaleString()}</span></span>
-          <span>Max DD: <span className="text-negative font-mono">{stats.maxDrawdown.toFixed(1)}%</span></span>
-          <span>Peak: <span className="text-foreground font-mono">${stats.peakEquity.toLocaleString()}</span></span>
+          <span>
+            Start:{' '}
+            <span className="text-foreground font-mono">${stats.startEquity.toLocaleString()}</span>
+          </span>
+          <span>
+            Current:{' '}
+            <span className="text-foreground font-mono">
+              ${stats.currentEquity.toLocaleString()}
+            </span>
+          </span>
+          <span>
+            Max DD: <span className="text-negative font-mono">{stats.maxDrawdown.toFixed(1)}%</span>
+          </span>
+          <span>
+            Peak:{' '}
+            <span className="text-foreground font-mono">${stats.peakEquity.toLocaleString()}</span>
+          </span>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">
           <span className="text-muted-foreground">Data source:</span> Bybit BTCUSDT 4h klines

@@ -47,13 +47,17 @@ const safeJsonParse = async (response: Response) => {
 // ============== API FUNCTIONS ==============
 
 // Fetch kline data
-const fetchKline = async (symbol: string = 'BTCUSDT', interval: string = '240', limit: number = 30): Promise<any[]> => {
+const fetchKline = async (
+  symbol: string = 'BTCUSDT',
+  interval: string = '240',
+  limit: number = 30
+): Promise<any[]> => {
   try {
     const response = await fetch(
       `${BYBIT_BASE_URL}/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
     );
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0 && data?.result?.list) {
       return data.result.list;
     }
@@ -79,11 +83,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         Equity: <span className="text-primary">{formatUsd(d.equity)}</span>
       </p>
       <p className={pnl >= 0 ? 'text-positive' : 'text-negative'}>
-        Net P&L: {pnl >= 0 ? '+' : ''}{formatUsd(pnl, '---', true)}
+        Net P&L: {pnl >= 0 ? '+' : ''}
+        {formatUsd(pnl, '---', true)}
       </p>
-      {d.drawdown < 0 && (
-        <p className="text-negative">DD: {d.drawdown.toFixed(2)}%</p>
-      )}
+      {d.drawdown < 0 && <p className="text-negative">DD: {d.drawdown.toFixed(2)}%</p>}
     </div>
   );
 };
@@ -108,49 +111,49 @@ export default function EquityCurveChartInner() {
 
       // Fetch real kline data for BTCUSDT
       const klines = await fetchKline('BTCUSDT', '240', 30);
-      
+
       if (klines.length === 0) {
         throw new Error('No kline data available');
       }
-      
+
       const startPrice = parseFloat(klines[0][1]);
       const baseEquity = BASE_EQUITY;
-      
+
       let peakEquity = baseEquity;
       let maxDrawdown = 0;
       let peakPrice = startPrice;
-      
+
       // Calculate equity and drawdown from real price data
       const equityData: EquityPoint[] = klines.map((k: any) => {
         const close = parseFloat(k[4]);
-        const priceChange = ((close - startPrice) / startPrice);
+        const priceChange = (close - startPrice) / startPrice;
         const equity = baseEquity * (1 + priceChange * 0.5);
-        
+
         // Track peak equity for drawdown calculation
         if (equity > peakEquity) {
           peakEquity = equity;
           peakPrice = close;
         }
-        
+
         // Calculate drawdown from peak equity
         const drawdown = peakEquity > 0 ? ((equity - peakEquity) / peakEquity) * 100 : 0;
-        
+
         // Track max drawdown
         if (drawdown < maxDrawdown) {
           maxDrawdown = drawdown;
         }
-        
+
         const date = new Date(parseInt(k[0]));
         const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        
+
         return {
           date: `${dateStr} ${timeStr}`,
           equity: Math.round(equity * 100) / 100,
           drawdown: Math.round(drawdown * 100) / 100,
         };
       });
-      
+
       // Create enhanced data with more points for smoother curve
       const enhancedData: EquityPoint[] = [];
       equityData.forEach((point, i) => {
@@ -159,7 +162,7 @@ export default function EquityCurveChartInner() {
           const nextPoint = equityData[i + 1];
           const midEquity = (point.equity + nextPoint.equity) / 2;
           const midDrawdown = (point.drawdown + nextPoint.drawdown) / 2;
-          
+
           enhancedData.push({
             date: `${point.date} → ${nextPoint.date}`,
             equity: Math.round(midEquity * 100) / 100,
@@ -167,11 +170,11 @@ export default function EquityCurveChartInner() {
           });
         }
       });
-      
+
       // Calculate final stats
       const finalEquity = enhancedData[enhancedData.length - 1]?.equity || baseEquity;
       const totalReturn = ((finalEquity - baseEquity) / baseEquity) * 100;
-      
+
       setData(enhancedData);
       setStats({
         startEquity: baseEquity,
@@ -180,7 +183,7 @@ export default function EquityCurveChartInner() {
         maxDrawdown: Math.round(Math.abs(maxDrawdown) * 100) / 100,
         peakEquity: peakEquity,
       });
-      
+
       setError(null);
     } catch (error) {
       console.error('Failed to fetch equity data:', error);
@@ -238,9 +241,7 @@ export default function EquityCurveChartInner() {
     <div className="card-surface p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            Equity Curve
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground">Equity Curve</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Based on BTC price action · {data.length} data points
           </p>
@@ -251,7 +252,8 @@ export default function EquityCurveChartInner() {
               onClick={() => setShowDrawdown(false)}
               className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all duration-150 ${
                 !showDrawdown
-                  ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Equity
@@ -260,7 +262,8 @@ export default function EquityCurveChartInner() {
               onClick={() => setShowDrawdown(true)}
               className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all duration-150 ${
                 showDrawdown
-                  ? 'bg-negative-subtle text-negative' : 'text-muted-foreground hover:text-foreground'
+                  ? 'bg-negative-subtle text-negative'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               Drawdown
@@ -268,18 +271,18 @@ export default function EquityCurveChartInner() {
           </div>
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Total Return</p>
-            <p className={`text-sm font-bold font-tabular ${stats.totalReturn >= 0 ? 'text-positive' : 'text-negative'}`}>
-              {stats.totalReturn >= 0 ? '+' : ''}{stats.totalReturn.toFixed(2)}%
+            <p
+              className={`text-sm font-bold font-tabular ${stats.totalReturn >= 0 ? 'text-positive' : 'text-negative'}`}
+            >
+              {stats.totalReturn >= 0 ? '+' : ''}
+              {stats.totalReturn.toFixed(2)}%
             </p>
           </div>
         </div>
       </div>
 
       <ResponsiveContainer width="100%" height={220}>
-        <AreaChart
-          data={data}
-          margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-        >
+        <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="equityCurveGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.2} />
@@ -290,11 +293,7 @@ export default function EquityCurveChartInner() {
               <stop offset="95%" stopColor="var(--negative)" stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid
-            strokeDasharray="3 3"
-            stroke="var(--border)"
-            vertical={false}
-          />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
           <XAxis
             dataKey="date"
             tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
@@ -340,10 +339,12 @@ export default function EquityCurveChartInner() {
       <div className="mt-3 pt-3 border-t border-border">
         <div className="flex justify-between text-[10px] text-muted-foreground">
           <span>
-            Start Equity: <span className="text-foreground font-mono">{formatUsd(stats.startEquity)}</span>
+            Start Equity:{' '}
+            <span className="text-foreground font-mono">{formatUsd(stats.startEquity)}</span>
           </span>
           <span>
-            Current: <span className="text-foreground font-mono">{formatUsd(stats.currentEquity)}</span>
+            Current:{' '}
+            <span className="text-foreground font-mono">{formatUsd(stats.currentEquity)}</span>
           </span>
           <span>
             Max DD: <span className="text-negative font-mono">{stats.maxDrawdown.toFixed(1)}%</span>

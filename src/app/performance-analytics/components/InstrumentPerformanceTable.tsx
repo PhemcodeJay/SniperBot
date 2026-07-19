@@ -33,7 +33,16 @@ type SortKey = keyof InstrumentRow;
 // ============== BYBIT API CONFIG ==============
 const BYBIT_BASE_URL = 'https://api.bybit.com';
 
-const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT'];
+const SUPPORTED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'ADAUSDT',
+  'DOGEUSDT',
+  'DOTUSDT',
+];
 
 // ============== API HELPERS ==============
 const safeJsonParse = async (response: Response) => {
@@ -51,22 +60,22 @@ const safeJsonParse = async (response: Response) => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -91,11 +100,11 @@ export default function InstrumentPerformanceTable() {
       // Fetch real market data
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       const tickerList = Object.values(tickers);
-      
+
       if (tickerList.length === 0) {
         throw new Error('No market data available');
       }
-      
+
       const instrumentData: InstrumentRow[] = tickerList
         .map((ticker: any) => {
           const price = parseFloat(ticker.lastPrice);
@@ -103,16 +112,23 @@ export default function InstrumentPerformanceTable() {
           const volume = parseFloat(ticker.volume24h);
           const high24h = parseFloat(ticker.highPrice24h);
           const low24h = parseFloat(ticker.lowPrice24h);
-          
+
           // Calculate volatility from 24h range
-          const volatility = high24h > 0 && low24h > 0 ? ((high24h - low24h) / low24h) * 100 : Math.abs(change24h);
-          
+          const volatility =
+            high24h > 0 && low24h > 0 ? ((high24h - low24h) / low24h) * 100 : Math.abs(change24h);
+
           // Derive trade metrics from real market data
-          const tradeCount = Math.max(1, Math.round(5 + Math.abs(change24h) * 0.5 + volatility * 0.3));
-          const winRate = Math.min(90, Math.max(40, 55 + Math.abs(change24h) * 1.5 + volatility * 0.3));
+          const tradeCount = Math.max(
+            1,
+            Math.round(5 + Math.abs(change24h) * 0.5 + volatility * 0.3)
+          );
+          const winRate = Math.min(
+            90,
+            Math.max(40, 55 + Math.abs(change24h) * 1.5 + volatility * 0.3)
+          );
           const wins = Math.round(tradeCount * (winRate / 100));
           const losses = tradeCount - wins;
-          
+
           // Calculate P&L from real price movements
           const avgProfit = Math.abs(change24h) * 2 + volatility * 0.5;
           const avgLoss = 15 + volatility * 0.8 + Math.abs(change24h) * 0.5;
@@ -120,13 +136,13 @@ export default function InstrumentPerformanceTable() {
           const grossLoss = losses * avgLoss;
           const netPnl = grossProfit - grossLoss;
           const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : 3.0;
-          
+
           // Determine regime from actual price behavior
           let regime: 'trending' | 'ranging' | 'volatile';
           if (Math.abs(change24h) > 3) regime = 'trending';
           else if (volatility > 2 || Math.abs(change24h) > 1.5) regime = 'volatile';
           else regime = 'ranging';
-          
+
           return {
             id: `inst-${ticker.symbol.toLowerCase()}`,
             symbol: ticker.symbol,
@@ -150,7 +166,7 @@ export default function InstrumentPerformanceTable() {
           };
         })
         .filter((item): item is InstrumentRow => item !== null);
-      
+
       setData(instrumentData);
     } catch (error) {
       console.error('Failed to fetch instrument data:', error);
@@ -257,7 +273,9 @@ export default function InstrumentPerformanceTable() {
         </div>
         <div className="text-right">
           <p className="text-[10px] text-muted-foreground">Total Net P&L</p>
-          <p className={`text-sm font-bold font-tabular ${totalNetPnl >= 0 ? 'text-positive' : 'text-negative'}`}>
+          <p
+            className={`text-sm font-bold font-tabular ${totalNetPnl >= 0 ? 'text-positive' : 'text-negative'}`}
+          >
             {totalNetPnl >= 0 ? '+' : ''}${totalNetPnl.toFixed(1)}
           </p>
         </div>
@@ -299,8 +317,11 @@ export default function InstrumentPerformanceTable() {
                     <span className="font-semibold text-foreground text-xs font-mono">
                       {row.symbol}
                     </span>
-                    <span className={`text-[9px] ${row.change24h >= 0 ? 'text-positive' : 'text-negative'}`}>
-                      {row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(1)}%
+                    <span
+                      className={`text-[9px] ${row.change24h >= 0 ? 'text-positive' : 'text-negative'}`}
+                    >
+                      {row.change24h >= 0 ? '+' : ''}
+                      {row.change24h.toFixed(1)}%
                     </span>
                   </div>
                 </td>
@@ -317,7 +338,8 @@ export default function InstrumentPerformanceTable() {
                           row.winRate >= 70
                             ? 'bg-positive'
                             : row.winRate >= 60
-                            ? 'bg-warning' : 'bg-negative'
+                              ? 'bg-warning'
+                              : 'bg-negative'
                         }`}
                         style={{ width: `${row.winRate}%` }}
                       />
@@ -327,7 +349,8 @@ export default function InstrumentPerformanceTable() {
                         row.winRate >= 70
                           ? 'text-positive'
                           : row.winRate >= 60
-                          ? 'text-warning' : 'text-negative'
+                            ? 'text-warning'
+                            : 'text-negative'
                       }`}
                     >
                       {row.winRate.toFixed(1)}%
@@ -340,7 +363,8 @@ export default function InstrumentPerformanceTable() {
                       row.profitFactor >= 2
                         ? 'text-positive'
                         : row.profitFactor >= 1.5
-                        ? 'text-warning' : 'text-negative'
+                          ? 'text-warning'
+                          : 'text-negative'
                     }`}
                   >
                     {row.profitFactor.toFixed(2)}
@@ -381,7 +405,7 @@ export default function InstrumentPerformanceTable() {
 
       <div className="px-5 py-3 border-t border-border bg-muted/20">
         <p className="text-[10px] text-muted-foreground">
-          <span className="text-muted-foreground">Data source:</span> Bybit real-time ticker data · 
+          <span className="text-muted-foreground">Data source:</span> Bybit real-time ticker data ·
           <span className="ml-1">Performance metrics derived from 24h price action</span>
         </p>
       </div>

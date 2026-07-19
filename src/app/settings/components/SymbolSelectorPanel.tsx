@@ -31,20 +31,20 @@ const safeJsonParse = async (response: Response) => {
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
-  'Major': 'bg-primary/10 text-primary',
-  'Meme': 'bg-warning-subtle text-warning',
-  'Alt': 'bg-info-subtle text-info',
-  'L2': 'bg-positive-subtle text-positive',
-  'DeFi': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-  'AI': 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400',
-  'Gaming': 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
+  Major: 'bg-primary/10 text-primary',
+  Meme: 'bg-warning-subtle text-warning',
+  Alt: 'bg-info-subtle text-info',
+  L2: 'bg-positive-subtle text-positive',
+  DeFi: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  AI: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400',
+  Gaming: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
 };
 
 const DEFAULT_SELECTED = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
 
 const getSymbolCategory = (symbol: string): string => {
   const base = symbol.replace('USDT', '').replace('USDC', '');
-  
+
   if (['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'DOT', 'LINK', 'AVAX'].includes(base)) {
     return 'Major';
   }
@@ -100,20 +100,20 @@ export default function SymbolSelectorPanel() {
 
     try {
       const tickers = await fetchTickers();
-      
+
       if (tickers.length === 0) {
         throw new Error('No symbols available');
       }
 
       const defaultEnabled = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
-      
+
       const mappedSymbols: SymbolConfig[] = tickers
         .filter((t: any) => t.symbol.endsWith('USDT'))
         .map((t: any) => {
           const volume = parseFloat(t.volume24h) || 0;
           const price = parseFloat(t.lastPrice) || 0;
           const change24h = parseFloat(t.price24hPcnt) * 100 || 0;
-          
+
           return {
             symbol: t.symbol,
             enabled: defaultEnabled.includes(t.symbol),
@@ -162,8 +162,8 @@ export default function SymbolSelectorPanel() {
       prev.includes(symbol)
         ? prev.filter((s) => s !== symbol)
         : prev.length < 20
-        ? [...prev, symbol]
-        : prev
+          ? [...prev, symbol]
+          : prev
     );
   };
 
@@ -232,7 +232,10 @@ export default function SymbolSelectorPanel() {
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-[11px] font-mono font-semibold"
             >
               {sym.replace('USDT', '')}
-              <button onClick={() => toggleSymbol(sym)} className="hover:text-negative transition-colors">
+              <button
+                onClick={() => toggleSymbol(sym)}
+                className="hover:text-negative transition-colors"
+              >
                 <X size={10} />
               </button>
             </span>
@@ -242,7 +245,10 @@ export default function SymbolSelectorPanel() {
 
       {/* Search */}
       <div className="relative mb-3">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Search
+          size={14}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
         <input
           type="text"
           value={search}
@@ -268,20 +274,28 @@ export default function SymbolSelectorPanel() {
                     : 'bg-background border-border text-secondary-foreground hover:border-primary/20 hover:bg-muted'
                 }`}
               >
-                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                  isSelected ? 'bg-primary border-primary' : 'border-border'
-                }`}>
+                <div
+                  className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                    isSelected ? 'bg-primary border-primary' : 'border-border'
+                  }`}
+                >
                   {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-mono font-semibold text-foreground truncate">{item.symbol}</p>
+                  <p className="text-xs font-mono font-semibold text-foreground truncate">
+                    {item.symbol}
+                  </p>
                   <p className="text-[10px] text-muted-foreground truncate">{item.baseAsset}</p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5 shrink-0">
-                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[category] || 'bg-muted text-muted-foreground'}`}>
+                  <span
+                    className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[category] || 'bg-muted text-muted-foreground'}`}
+                  >
                     {category}
                   </span>
-                  <span className="text-[9px] text-muted-foreground font-mono">{item.volume24h}</span>
+                  <span className="text-[9px] text-muted-foreground font-mono">
+                    {item.volume24h}
+                  </span>
                 </div>
               </button>
             );
@@ -295,12 +309,11 @@ export default function SymbolSelectorPanel() {
 
       {/* Show count */}
       <div className="flex justify-between items-center mt-2 text-[10px] text-muted-foreground">
-        <span>Showing {filteredSymbols.length} of {symbols.length} symbols</span>
+        <span>
+          Showing {filteredSymbols.length} of {symbols.length} symbols
+        </span>
         {!showAll && symbols.length > 50 && (
-          <button
-            onClick={() => setShowAll(true)}
-            className="text-primary hover:underline"
-          >
+          <button onClick={() => setShowAll(true)} className="text-primary hover:underline">
             Show all {symbols.length} symbols
           </button>
         )}
@@ -312,7 +325,9 @@ export default function SymbolSelectorPanel() {
           saved ? 'bg-positive text-white' : 'bg-primary hover:bg-primary/90 text-white'
         }`}
       >
-        {saved ? '✓ Symbols Saved' : `Save ${selected.length} Symbol${selected.length !== 1 ? 's' : ''}`}
+        {saved
+          ? '✓ Symbols Saved'
+          : `Save ${selected.length} Symbol${selected.length !== 1 ? 's' : ''}`}
       </button>
     </div>
   );

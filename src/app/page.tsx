@@ -5,20 +5,70 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/AppLayout';
-import { BYBIT_BASE_URL, getBybitCredentials, createBybitAuthHeaders, safeJsonParse, fetchBybitWalletBalance } from '@/lib/bybit';
+import {
+  BYBIT_BASE_URL,
+  getBybitCredentials,
+  createBybitAuthHeaders,
+  safeJsonParse,
+  fetchBybitWalletBalance,
+} from '@/lib/bybit';
 import { formatUsd } from '@/lib/formatters';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
-import { appendSharedAlert, calculateLivePnl, getSharedTradingState, setSharedBalance, setSharedBotState, setSharedMetrics, setSharedSignals, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
-import { getPaperState, openPaperPosition, closePaperPosition as closePaperPos, resetPaperState, updatePaperPositions, PaperPosition } from '@/lib/paperTrading';
+import {
+  appendSharedAlert,
+  calculateLivePnl,
+  getSharedTradingState,
+  setSharedBalance,
+  setSharedBotState,
+  setSharedMetrics,
+  setSharedSignals,
+  setSharedTrades,
+  subscribeToSharedTradingState,
+} from '@/lib/tradingState';
+import {
+  getPaperState,
+  openPaperPosition,
+  closePaperPosition as closePaperPos,
+  resetPaperState,
+  updatePaperPositions,
+  PaperPosition,
+} from '@/lib/paperTrading';
 import { autoExecutor } from '@/lib/autoExecutor';
-import { 
-  TrendingUp, TrendingDown, DollarSign, Activity, 
-  Zap, Wifi, WifiOff, RefreshCw, AlertCircle,
-  Wallet, BarChart3, Play, StopCircle, Settings, 
-  Loader2, X, Plus, Minus, Shield, Bell, Bot,
-  ChevronDown, ChevronUp, Clock, Calendar, Database,
-  CheckCircle, Server, Network, Sparkles, ExternalLink,
-  LayoutDashboard, FileText, ArrowRight
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Activity,
+  Zap,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  AlertCircle,
+  Wallet,
+  BarChart3,
+  Play,
+  StopCircle,
+  Settings,
+  Loader2,
+  X,
+  Plus,
+  Minus,
+  Shield,
+  Bell,
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Calendar,
+  Database,
+  CheckCircle,
+  Server,
+  Network,
+  Sparkles,
+  ExternalLink,
+  LayoutDashboard,
+  FileText,
+  ArrowRight,
 } from 'lucide-react';
 import { realtimeManager } from '@/lib/realtimeManager';
 
@@ -119,7 +169,15 @@ interface BotStatus {
 // ============== BYBIT API CONFIG ==============
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
-const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+const SUPPORTED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'ADAUSDT',
+  'DOGEUSDT',
+];
 
 // ============== API HELPERS ==============
 const getApiCredentials = () => getBybitCredentials();
@@ -170,10 +228,13 @@ const fetchPositions = async (): Promise<Position[]> => {
           const markPrice = parseFloat(pos.markPrice);
           const pnl = parseFloat(pos.unrealisedPnl || 0);
           const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
-          
-          const entryTime = pos.createdTime ? new Date(parseInt(pos.createdTime)).toISOString() : new Date().toISOString();
-          const duration = pos.createdTime ? 
-            `${Math.floor((Date.now() - parseInt(pos.createdTime)) / 60000)}m` : '0m';
+
+          const entryTime = pos.createdTime
+            ? new Date(parseInt(pos.createdTime)).toISOString()
+            : new Date().toISOString();
+          const duration = pos.createdTime
+            ? `${Math.floor((Date.now() - parseInt(pos.createdTime)) / 60000)}m`
+            : '0m';
 
           positions.push({
             id: `pos-${pos.symbol}-${pos.positionIdx || 0}`,
@@ -263,22 +324,22 @@ const fetchOrderHistory = async (): Promise<Trade[]> => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -288,9 +349,9 @@ const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => 
 
 // Execute trade
 const executeTradeOnBybit = async (
-  symbol: string, 
-  side: 'LONG' | 'SHORT', 
-  size: number, 
+  symbol: string,
+  side: 'LONG' | 'SHORT',
+  size: number,
   leverage: number
 ): Promise<{ success: boolean; orderId?: string; error?: string }> => {
   try {
@@ -301,8 +362,13 @@ const executeTradeOnBybit = async (
 
     const recvWindow = '5000';
 
-    const leverageHeaders = await createBybitAuthHeaders(apiKey, apiSecret, `category=linear&symbol=${symbol}&buyLeverage=${leverage}&sellLeverage=${leverage}`, recvWindow);
-    
+    const leverageHeaders = await createBybitAuthHeaders(
+      apiKey,
+      apiSecret,
+      `category=linear&symbol=${symbol}&buyLeverage=${leverage}&sellLeverage=${leverage}`,
+      recvWindow
+    );
+
     await fetch(`${BYBIT_BASE_URL}/v5/position/set-leverage`, {
       method: 'POST',
       headers: {
@@ -321,7 +387,7 @@ const executeTradeOnBybit = async (
     const orderSide = side === 'LONG' ? 'Buy' : 'Sell';
     const orderParams = `category=linear&symbol=${symbol}&side=${orderSide}&orderType=Market&qty=${size}&timeInForce=GTC`;
     const orderHeaders = await createBybitAuthHeaders(apiKey, apiSecret, orderParams, recvWindow);
-    
+
     const orderResponse = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
       method: 'POST',
       headers: {
@@ -339,7 +405,7 @@ const executeTradeOnBybit = async (
     });
 
     const data = await safeJsonParse(orderResponse);
-    
+
     if (data?.retCode === 0) {
       return { success: true, orderId: data.result?.orderId };
     } else {
@@ -351,7 +417,9 @@ const executeTradeOnBybit = async (
 };
 
 // Close position
-const closePositionOnBybit = async (position: Position): Promise<{ success: boolean; error?: string }> => {
+const closePositionOnBybit = async (
+  position: Position
+): Promise<{ success: boolean; error?: string }> => {
   try {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) {
@@ -362,7 +430,7 @@ const closePositionOnBybit = async (position: Position): Promise<{ success: bool
     const side = position.side === 'LONG' ? 'Sell' : 'Buy';
     const params = `category=linear&symbol=${position.symbol}&side=${side}&orderType=Market&qty=${position.size}&timeInForce=GTC&positionIdx=${position.positionIdx || 0}`;
     const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
-    
+
     const response = await fetch(`${BYBIT_BASE_URL}/v5/order/create`, {
       method: 'POST',
       headers: {
@@ -381,7 +449,7 @@ const closePositionOnBybit = async (position: Position): Promise<{ success: bool
     });
 
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0) {
       return { success: true };
     } else {
@@ -397,9 +465,11 @@ const closePositionOnBybit = async (position: Position): Promise<{ success: bool
 export default function Home() {
   const router = useRouter();
   const { data: realtimeData, loading: dataLoading, error: dataError } = useSharedRealtimeData();
-  
+
   // State
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'analytics' | 'signals' | 'alerts' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<
+    'dashboard' | 'analytics' | 'signals' | 'alerts' | 'settings'
+  >('dashboard');
   const [metrics, setMetrics] = useState<AccountMetrics>({
     totalBalance: realtimeData?.balance?.totalEquity || 100,
     availableBalance: realtimeData?.balance?.availableBalance || 100,
@@ -414,7 +484,7 @@ export default function Home() {
     maxDrawdown: 0,
     riskExposure: 0,
   });
-  
+
   const [consecutiveLosses, setConsecutiveLosses] = useState(0);
   const [positions, setPositions] = useState<Position[]>([]);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -430,7 +500,9 @@ export default function Home() {
     uptime: '0h 0m',
     autoTradingEnabled: true,
   });
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'disconnected' | 'connecting' | 'connected' | 'error'
+  >('connecting');
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -459,10 +531,10 @@ export default function Home() {
 
   useEffect(() => {
     const unsubscribe = subscribeToSharedTradingState((state) => {
-      setMetrics(prev => ({ ...prev, ...state.metrics }));
+      setMetrics((prev) => ({ ...prev, ...state.metrics }));
       setSignals(state.signals);
       setAlerts(state.alerts);
-      setBotStatus(prev => ({ ...prev, ...state.bot }));
+      setBotStatus((prev) => ({ ...prev, ...state.bot }));
       setActualBalance(state.balance.totalEquity);
       setBaseEquity(state.balance.baseEquity);
       setPaperEquity(state.balance.totalEquity);
@@ -479,7 +551,7 @@ export default function Home() {
       setActualBalance(equity);
       setBaseEquity(equity);
       setPaperEquity(equity);
-      setMetrics(prev => ({
+      setMetrics((prev) => ({
         ...prev,
         totalBalance: equity,
         availableBalance: realtimeData.balance.availableBalance || 100,
@@ -489,7 +561,7 @@ export default function Home() {
     if (realtimeData?.positions) {
       // Update positions if available
       const positions: Position[] = realtimeData.positions
-        .filter(pos => parseFloat(pos.size) !== 0)
+        .filter((pos) => parseFloat(pos.size) !== 0)
         .map((pos: any) => {
           const size = parseFloat(pos.size);
           const side = pos.side === 'Buy' ? 'LONG' : 'SHORT';
@@ -497,10 +569,10 @@ export default function Home() {
           const currentPrice = parseFloat(pos.markPrice || pos.currentPrice || 0);
           const pnl = parseFloat(pos.unrealisedPnl || 0);
           const pnlPct = entryPrice > 0 ? (pnl / (entryPrice * Math.abs(size))) * 100 : 0;
-          
+
           const createdTime = pos.createdTime ? parseInt(pos.createdTime) : Date.now();
           const duration = `${Math.floor((Date.now() - createdTime) / 60000)}m`;
-          
+
           return {
             id: `pos-${pos.symbol}-${pos.positionIdx || 0}`,
             symbol: pos.symbol,
@@ -538,7 +610,9 @@ export default function Home() {
     try {
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       const livePositions = positionsRef.current.map((pos) => {
-        const currentPrice = parseFloat(tickers[pos.symbol]?.lastPrice || pos.currentPrice || pos.entryPrice || '0');
+        const currentPrice = parseFloat(
+          tickers[pos.symbol]?.lastPrice || pos.currentPrice || pos.entryPrice || '0'
+        );
         const { pnl, pnlPct } = calculateLivePnl(pos.entryPrice, currentPrice, pos.size, pos.side);
         return {
           ...pos,
@@ -552,7 +626,12 @@ export default function Home() {
         if (trade.status !== 'open') return trade;
 
         const currentPrice = parseFloat(tickers[trade.symbol]?.lastPrice || '0');
-        const { pnl, pnlPct } = calculateLivePnl(trade.entryPrice, currentPrice, trade.size, trade.side);
+        const { pnl, pnlPct } = calculateLivePnl(
+          trade.entryPrice,
+          currentPrice,
+          trade.size,
+          trade.side
+        );
         return {
           ...trade,
           pnl,
@@ -593,7 +672,7 @@ export default function Home() {
 
       setPositions(livePositions);
       setTrades(currentTrades);
-      setMetrics(prev => ({ ...prev, ...nextMetrics }));
+      setMetrics((prev) => ({ ...prev, ...nextMetrics }));
       setSharedMetrics({
         totalPnl: nextMetrics.totalPnl,
         totalPnlPct: nextMetrics.totalPnlPct,
@@ -608,7 +687,17 @@ export default function Home() {
     } catch (err) {
       console.error('Error refreshing P&L snapshot:', err);
     }
-  }, [actualBalance, baseEquity, hasValidCredentials, metrics.availableBalance, metrics.maxDrawdown, metrics.riskExposure, metrics.totalBalance, metrics.totalTrades, metrics.winRate]);
+  }, [
+    actualBalance,
+    baseEquity,
+    hasValidCredentials,
+    metrics.availableBalance,
+    metrics.maxDrawdown,
+    metrics.riskExposure,
+    metrics.totalBalance,
+    metrics.totalTrades,
+    metrics.winRate,
+  ]);
 
   // Fetch all data
   const fetchAllData = useCallback(async () => {
@@ -618,7 +707,7 @@ export default function Home() {
       setError(null);
 
       const hasKeys = hasValidCredentials();
-      
+
       if (!hasKeys) {
         setIsApiConnected(false);
         setIsLoading(false);
@@ -643,7 +732,9 @@ export default function Home() {
       // Fetch ticker data
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       const livePositions = positionData.map((pos) => {
-        const currentPrice = parseFloat(tickers[pos.symbol]?.lastPrice || pos.currentPrice || pos.entryPrice || '0');
+        const currentPrice = parseFloat(
+          tickers[pos.symbol]?.lastPrice || pos.currentPrice || pos.entryPrice || '0'
+        );
         const { pnl, pnlPct } = calculateLivePnl(pos.entryPrice, currentPrice, pos.size, pos.side);
         return {
           ...pos,
@@ -663,19 +754,19 @@ export default function Home() {
       let losses = 0;
 
       // Calculate P&L from positions
-      livePositions.forEach(pos => {
+      livePositions.forEach((pos) => {
         totalPnl += pos.pnl;
         dailyPnl += pos.pnl;
       });
 
       // Calculate P&L from closed trades
-      tradeData.forEach(trade => {
+      tradeData.forEach((trade) => {
         totalPnl += trade.pnl;
         if (trade.pnl > 0) wins++;
         else if (trade.pnl < 0) losses++;
       });
 
-      const winRate = (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0;
+      const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0;
       const totalReturn = baseEquity > 0 ? ((totalEquity - baseEquity) / baseEquity) * 100 : 0;
       const nextMetrics = {
         totalBalance: totalEquity,
@@ -706,7 +797,7 @@ export default function Home() {
       });
 
       // Update equity data
-      setEquityData(prev => {
+      setEquityData((prev) => {
         const newData = [...prev, totalEquity];
         return newData.slice(-90);
       });
@@ -717,12 +808,12 @@ export default function Home() {
         const price = parseFloat(ticker.lastPrice);
         const change24h = parseFloat(ticker.price24hPcnt) * 100;
         const volume = parseFloat(ticker.volume24h);
-        
+
         if (Math.abs(change24h) > 1.5) {
           const isLong = change24h > 0;
           const confidence = 70 + Math.abs(change24h) * 2 + Math.min(volume / 1e8, 15);
           const atr = price * 0.01;
-          
+
           newSignals.push({
             id: `sig-${ticker.symbol}-${Date.now()}`,
             symbol: ticker.symbol,
@@ -744,13 +835,12 @@ export default function Home() {
         }
       });
 
-      setSignals(prevSignals => {
+      setSignals((prevSignals) => {
         const mergedSignals = [...newSignals, ...prevSignals].slice(0, 50);
         setSharedSignals(mergedSignals as any);
         return mergedSignals;
       });
       setLastUpdate(new Date());
-      
     } catch (err: any) {
       console.error('Error fetching data:', err);
       setError(err.message || 'Failed to fetch data');
@@ -770,7 +860,12 @@ export default function Home() {
   }, []);
 
   // Execute trade (handles both paper and live mode)
-  const executeTrade = async (symbol: string, side: 'LONG' | 'SHORT', size: number, leverage: number) => {
+  const executeTrade = async (
+    symbol: string,
+    side: 'LONG' | 'SHORT',
+    size: number,
+    leverage: number
+  ) => {
     try {
       setIsExecuting(true);
       setError(null);
@@ -792,27 +887,37 @@ export default function Home() {
         const stopLoss = side === 'LONG' ? entryPrice - atr * 1.5 : entryPrice + atr * 1.5;
         const takeProfit = side === 'LONG' ? entryPrice + atr * 2.5 : entryPrice - atr * 2.5;
 
-        const result = openPaperPosition(symbol, side, entryPrice, size, leverage, stopLoss, takeProfit);
+        const result = openPaperPosition(
+          symbol,
+          side,
+          entryPrice,
+          size,
+          leverage,
+          stopLoss,
+          takeProfit
+        );
         if (result.success) {
           const paperState = getPaperState();
           setPaperEquity(paperState.balance);
-          setPositions(paperState.positions.map(p => ({
-            id: p.id,
-            symbol: p.symbol,
-            side: p.side,
-            entryPrice: p.entryPrice,
-            currentPrice: p.currentPrice,
-            size: p.size,
-            pnl: p.pnl,
-            pnlPct: p.pnlPct,
-            entryTime: p.entryTime,
-            duration: p.duration,
-            leverage: p.leverage,
-            liquidationPrice: 0,
-            stopLoss: p.stopLoss,
-            takeProfit: p.takeProfit,
-          })));
-          setMetrics(prev => ({
+          setPositions(
+            paperState.positions.map((p) => ({
+              id: p.id,
+              symbol: p.symbol,
+              side: p.side,
+              entryPrice: p.entryPrice,
+              currentPrice: p.currentPrice,
+              size: p.size,
+              pnl: p.pnl,
+              pnlPct: p.pnlPct,
+              entryTime: p.entryTime,
+              duration: p.duration,
+              leverage: p.leverage,
+              liquidationPrice: 0,
+              stopLoss: p.stopLoss,
+              takeProfit: p.takeProfit,
+            }))
+          );
+          setMetrics((prev) => ({
             ...prev,
             totalBalance: paperState.balance,
             availableBalance: paperState.balance,
@@ -820,9 +925,17 @@ export default function Home() {
             openPositions: paperState.positions.length,
             totalPnl: paperState.totalPnl,
             totalTrades: paperState.totalTrades,
-            winRate: paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
+            winRate:
+              paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
           }));
-          addAlert('trade', 'high', `📄 ${side} ${symbol} (Paper)`, `Paper position opened at $${entryPrice.toFixed(2)} with ${leverage}x leverage`, symbol, entryPrice);
+          addAlert(
+            'trade',
+            'high',
+            `📄 ${side} ${symbol} (Paper)`,
+            `Paper position opened at $${entryPrice.toFixed(2)} with ${leverage}x leverage`,
+            symbol,
+            entryPrice
+          );
         } else {
           setError(`❌ Paper trade failed: ${result.error}`);
         }
@@ -830,11 +943,23 @@ export default function Home() {
         // Live mode: execute real Bybit order
         const result = await executeTradeOnBybit(symbol, side, size, leverage);
         if (result.success) {
-          addAlert('trade', 'high', `✅ ${side} ${symbol}`, `Position opened at market price with ${leverage}x leverage`, symbol);
+          addAlert(
+            'trade',
+            'high',
+            `✅ ${side} ${symbol}`,
+            `Position opened at market price with ${leverage}x leverage`,
+            symbol
+          );
           await fetchAllData();
         } else {
           setError(`❌ Order failed: ${result.error}`);
-          addAlert('system', 'medium', '❌ Trade Failed', `Failed to open ${side} ${symbol}: ${result.error}`, symbol);
+          addAlert(
+            'system',
+            'medium',
+            '❌ Trade Failed',
+            `Failed to open ${side} ${symbol}: ${result.error}`,
+            symbol
+          );
         }
       }
     } catch (err: any) {
@@ -853,28 +978,30 @@ export default function Home() {
         const tickers = await fetchTickers([position.symbol]);
         const ticker = tickers[position.symbol];
         const exitPrice = ticker ? parseFloat(ticker.lastPrice) : position.currentPrice;
-        
+
         const result = closePaperPos(position.id, exitPrice, 'MANUAL');
         if (result.success) {
           const paperState = getPaperState();
           setPaperEquity(paperState.balance);
-          setPositions(paperState.positions.map(p => ({
-            id: p.id,
-            symbol: p.symbol,
-            side: p.side,
-            entryPrice: p.entryPrice,
-            currentPrice: p.currentPrice,
-            size: p.size,
-            pnl: p.pnl,
-            pnlPct: p.pnlPct,
-            entryTime: p.entryTime,
-            duration: p.duration,
-            leverage: p.leverage,
-            liquidationPrice: 0,
-            stopLoss: p.stopLoss,
-            takeProfit: p.takeProfit,
-          })));
-          setMetrics(prev => ({
+          setPositions(
+            paperState.positions.map((p) => ({
+              id: p.id,
+              symbol: p.symbol,
+              side: p.side,
+              entryPrice: p.entryPrice,
+              currentPrice: p.currentPrice,
+              size: p.size,
+              pnl: p.pnl,
+              pnlPct: p.pnlPct,
+              entryTime: p.entryTime,
+              duration: p.duration,
+              leverage: p.leverage,
+              liquidationPrice: 0,
+              stopLoss: p.stopLoss,
+              takeProfit: p.takeProfit,
+            }))
+          );
+          setMetrics((prev) => ({
             ...prev,
             totalBalance: paperState.balance,
             availableBalance: paperState.balance,
@@ -882,9 +1009,16 @@ export default function Home() {
             openPositions: paperState.positions.length,
             totalPnl: paperState.totalPnl,
             totalTrades: paperState.totalTrades,
-            winRate: paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
+            winRate:
+              paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
           }));
-          addAlert('trade', 'medium', `📄 Position Closed (Paper)`, `Closed ${position.side} ${position.symbol}`, position.symbol);
+          addAlert(
+            'trade',
+            'medium',
+            `📄 Position Closed (Paper)`,
+            `Closed ${position.side} ${position.symbol}`,
+            position.symbol
+          );
         } else {
           setError(`❌ Close failed: ${result.error}`);
         }
@@ -893,7 +1027,13 @@ export default function Home() {
         const result = await closePositionOnBybit(position);
         if (result.success) {
           await fetchAllData();
-          addAlert('trade', 'medium', `✅ Position Closed`, `Closed ${position.side} ${position.symbol}`, position.symbol);
+          addAlert(
+            'trade',
+            'medium',
+            `✅ Position Closed`,
+            `Closed ${position.side} ${position.symbol}`,
+            position.symbol
+          );
         } else {
           setError(`❌ Close failed: ${result.error}`);
         }
@@ -905,7 +1045,14 @@ export default function Home() {
   };
 
   // Add alert
-  const addAlert = (type: Alert['type'], priority: Alert['priority'], title: string, message: string, symbol?: string, price?: number) => {
+  const addAlert = (
+    type: Alert['type'],
+    priority: Alert['priority'],
+    title: string,
+    message: string,
+    symbol?: string,
+    price?: number
+  ) => {
     const newAlert: Alert = {
       id: `alert-${Date.now()}`,
       type,
@@ -918,7 +1065,7 @@ export default function Home() {
       symbol,
       price,
     };
-    setAlerts(prev => [newAlert, ...prev].slice(0, 50));
+    setAlerts((prev) => [newAlert, ...prev].slice(0, 50));
     appendSharedAlert(newAlert);
   };
 
@@ -930,15 +1077,15 @@ export default function Home() {
       lastAction: 'Bot started',
       lastActionTime: new Date().toLocaleTimeString(),
     };
-    setBotStatus(prev => ({ ...prev, ...nextBotState }));
+    setBotStatus((prev) => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
     setBotStartTime(Date.now());
-    
+
     // Start auto-executor in paper mode by default
     autoExecutor.setMode('paper');
     autoExecutor.setConfig({ enabled: true });
     autoExecutor.start();
-    
+
     addAlert('system', 'medium', '🤖 Bot Started', 'Trading bot has been activated in PAPER mode');
   };
 
@@ -947,7 +1094,9 @@ export default function Home() {
     // enable auto-trading when bot starts
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('auto_trading_enabled', 'true');
-      window.dispatchEvent(new CustomEvent('auto-trading-settings-changed', { detail: { enabled: true } }));
+      window.dispatchEvent(
+        new CustomEvent('auto-trading-settings-changed', { detail: { enabled: true } })
+      );
       window.dispatchEvent(new CustomEvent('bot-started', { detail: {} }));
     }
     handleStartBot();
@@ -961,13 +1110,13 @@ export default function Home() {
       lastActionTime: new Date().toLocaleTimeString(),
       uptime: '0h 0m',
     };
-    setBotStatus(prev => ({ ...prev, ...nextBotState }));
+    setBotStatus((prev) => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
     setBotStartTime(null);
-    
+
     // Stop auto-executor
     autoExecutor.stop();
-    
+
     addAlert('system', 'medium', '🛑 Bot Stopped', 'Trading bot has been deactivated');
   };
 
@@ -978,7 +1127,7 @@ export default function Home() {
       lastAction: `Switched to ${newMode} mode`,
       lastActionTime: new Date().toLocaleTimeString(),
     };
-    setBotStatus(prev => ({ ...prev, ...nextBotState }));
+    setBotStatus((prev) => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
 
     // Update auto-executor mode
@@ -988,7 +1137,7 @@ export default function Home() {
       // Initialize paper state if not already done
       const paperState = getPaperState();
       setPaperEquity(paperState.balance);
-      setMetrics(prev => ({
+      setMetrics((prev) => ({
         ...prev,
         totalBalance: paperState.balance,
         availableBalance: paperState.balance,
@@ -998,26 +1147,33 @@ export default function Home() {
         winRate: paperState.totalTrades > 0 ? (paperState.wins / paperState.totalTrades) * 100 : 0,
         openPositions: paperState.positions.length,
       }));
-      setPositions(paperState.positions.map(p => ({
-        id: p.id,
-        symbol: p.symbol,
-        side: p.side,
-        entryPrice: p.entryPrice,
-        currentPrice: p.currentPrice,
-        size: p.size,
-        pnl: p.pnl,
-        pnlPct: p.pnlPct,
-        entryTime: p.entryTime,
-        duration: p.duration,
-        leverage: p.leverage,
-        liquidationPrice: 0,
-        stopLoss: p.stopLoss,
-        takeProfit: p.takeProfit,
-      })));
+      setPositions(
+        paperState.positions.map((p) => ({
+          id: p.id,
+          symbol: p.symbol,
+          side: p.side,
+          entryPrice: p.entryPrice,
+          currentPrice: p.currentPrice,
+          size: p.size,
+          pnl: p.pnl,
+          pnlPct: p.pnlPct,
+          entryTime: p.entryTime,
+          duration: p.duration,
+          leverage: p.leverage,
+          liquidationPrice: 0,
+          stopLoss: p.stopLoss,
+          takeProfit: p.takeProfit,
+        }))
+      );
     } else {
       fetchAllData();
     }
-    addAlert('system', 'low', `🔄 Switched to ${newMode} mode`, `Trading mode changed to ${newMode}`);
+    addAlert(
+      'system',
+      'low',
+      `🔄 Switched to ${newMode} mode`,
+      `Trading mode changed to ${newMode}`
+    );
   };
 
   const handleToggleAutoTrading = () => {
@@ -1027,7 +1183,7 @@ export default function Home() {
       lastAction: nextValue ? 'Auto-trading enabled' : 'Auto-trading paused',
       lastActionTime: new Date().toLocaleTimeString(),
     };
-    setBotStatus(prev => ({ ...prev, ...nextBotState }));
+    setBotStatus((prev) => ({ ...prev, ...nextBotState }));
     setSharedBotState(nextBotState);
 
     // Update auto-executor enabled state
@@ -1035,7 +1191,9 @@ export default function Home() {
 
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('auto_trading_enabled', String(nextValue));
-      window.dispatchEvent(new CustomEvent('auto-trading-settings-changed', { detail: { enabled: nextValue } }));
+      window.dispatchEvent(
+        new CustomEvent('auto-trading-settings-changed', { detail: { enabled: nextValue } })
+      );
     }
   };
 
@@ -1044,7 +1202,7 @@ export default function Home() {
     if (typeof window !== 'undefined') {
       const savedSetting = window.localStorage.getItem('auto_trading_enabled');
       if (savedSetting !== null) {
-        setBotStatus(prev => ({ ...prev, autoTradingEnabled: savedSetting === 'true' }));
+        setBotStatus((prev) => ({ ...prev, autoTradingEnabled: savedSetting === 'true' }));
       }
     }
 
@@ -1075,7 +1233,7 @@ export default function Home() {
         const diff = Math.floor((Date.now() - botStartTime) / 1000);
         const hours = Math.floor(diff / 3600);
         const minutes = Math.floor((diff % 3600) / 60);
-        setBotStatus(prev => ({ ...prev, uptime: `${hours}h ${minutes}m` }));
+        setBotStatus((prev) => ({ ...prev, uptime: `${hours}h ${minutes}m` }));
       }, 60000);
       return () => clearInterval(interval);
     }
@@ -1091,13 +1249,13 @@ export default function Home() {
           <div className="animate-pulse space-y-4">
             <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded" />
             <div className="grid grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(i => (
+              {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="h-24 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
             <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded" />
             <div className="grid grid-cols-3 gap-4">
-              {[1, 2, 3].map(i => (
+              {[1, 2, 3].map((i) => (
                 <div key={i} className="h-64 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
@@ -1138,16 +1296,24 @@ export default function Home() {
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 Real-time trading from Bybit
               </p>
-              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-                botStatus.isRunning 
-                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-              }`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${botStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+              <div
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  botStatus.isRunning
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                }`}
+              >
+                <div
+                  className={`w-1.5 h-1.5 rounded-full ${botStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
+                />
                 {botStatus.isRunning ? 'Active' : 'Stopped'}
               </div>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${botStatus.mode === 'live' && botStatus.autoTradingEnabled ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'}`}>
-                {botStatus.mode === 'live' && botStatus.autoTradingEnabled ? '⚡ Live Trades ON' : '⏸ Live Trades PAUSED'}
+              <span
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${botStatus.mode === 'live' && botStatus.autoTradingEnabled ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700'}`}
+              >
+                {botStatus.mode === 'live' && botStatus.autoTradingEnabled
+                  ? '⚡ Live Trades ON'
+                  : '⏸ Live Trades PAUSED'}
               </span>
               {isApiConnected && (
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
@@ -1160,24 +1326,34 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs px-3 py-1.5 rounded-lg ${
-              botStatus.mode === 'live' 
-                ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' 
-                : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-            }`}>
+            <span
+              className={`text-xs px-3 py-1.5 rounded-lg ${
+                botStatus.mode === 'live'
+                  ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                  : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+              }`}
+            >
               {botStatus.mode === 'live' ? '⚠️ LIVE MODE' : '📄 PAPER MODE'}
             </span>
-            <span className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
-              metrics.totalPnl >= 0 ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-            }`}>
-              Total P&L: {metrics.totalPnl >= 0 ? '+' : ''}{formatUsd(metrics.totalPnl, '$0.00', true)}
+            <span
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium ${
+                metrics.totalPnl >= 0
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+              }`}
+            >
+              Total P&L: {metrics.totalPnl >= 0 ? '+' : ''}
+              {formatUsd(metrics.totalPnl, '$0.00', true)}
             </span>
             <button
               onClick={fetchAllData}
               disabled={isRefreshing}
               className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={16} className={`text-gray-600 dark:text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                size={16}
+                className={`text-gray-600 dark:text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`}
+              />
             </button>
           </div>
         </div>
@@ -1193,12 +1369,14 @@ export default function Home() {
                   onChange={(e) => {}}
                   className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
                 >
-                  {SUPPORTED_SYMBOLS.map(s => (
-                    <option key={s} value={s}>{s}</option>
+                  {SUPPORTED_SYMBOLS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
                   ))}
                 </select>
               </div>
-              
+
               <div className="flex items-center gap-1 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                 {(['LONG', 'SHORT'] as const).map((s) => (
                   <button
@@ -1211,7 +1389,7 @@ export default function Home() {
                   </button>
                 ))}
               </div>
-              
+
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Size:</span>
                 <input
@@ -1222,16 +1400,18 @@ export default function Home() {
                   className="w-20 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
                 />
               </div>
-              
+
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Leverage:</span>
                 <select className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                  {[1, 2, 3, 5, 8, 10, 15, 20, 25, 30].map(v => (
-                    <option key={v} value={v}>{v}x</option>
+                  {[1, 2, 3, 5, 8, 10, 15, 20, 25, 30].map((v) => (
+                    <option key={v} value={v}>
+                      {v}x
+                    </option>
                   ))}
                 </select>
               </div>
-              
+
               <button
                 onClick={() => executeTrade(SUPPORTED_SYMBOLS[0], 'LONG', 0.001, 5)}
                 disabled={isExecuting}
@@ -1247,18 +1427,50 @@ export default function Home() {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {[
-            { label: 'Total Equity', value: formatUsd(metrics.equity, '$0.00', true), change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`, color: metrics.totalPnlPct >= 0 ? 'text-green-600' : 'text-red-600' },
-            { label: 'Total P&L', value: `${metrics.totalPnl >= 0 ? '+' : ''}${formatUsd(metrics.totalPnl, '$0.00', true)}`, change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`, color: metrics.totalPnl >= 0 ? 'text-green-600' : 'text-red-600' },
-            { label: 'Daily P&L', value: `${metrics.dailyPnl >= 0 ? '+' : ''}${formatUsd(metrics.dailyPnl, '$0.00', true)}`, change: `${metrics.dailyPnlPct >= 0 ? '+' : ''}${metrics.dailyPnlPct.toFixed(2)}%`, color: metrics.dailyPnl >= 0 ? 'text-green-600' : 'text-red-600' },
-            { label: 'Open Positions', value: metrics.openPositions.toString(), change: `${metrics.riskExposure.toFixed(1)}% exposure`, color: 'text-blue-600' },
-            { label: 'Win Rate', value: `${metrics.winRate.toFixed(1)}%`, change: `${metrics.totalTrades} trades`, color: metrics.winRate >= 60 ? 'text-green-600' : 'text-yellow-600' },
+            {
+              label: 'Total Equity',
+              value: formatUsd(metrics.equity, '$0.00', true),
+              change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`,
+              color: metrics.totalPnlPct >= 0 ? 'text-green-600' : 'text-red-600',
+            },
+            {
+              label: 'Total P&L',
+              value: `${metrics.totalPnl >= 0 ? '+' : ''}${formatUsd(metrics.totalPnl, '$0.00', true)}`,
+              change: `${metrics.totalPnlPct >= 0 ? '+' : ''}${metrics.totalPnlPct.toFixed(2)}%`,
+              color: metrics.totalPnl >= 0 ? 'text-green-600' : 'text-red-600',
+            },
+            {
+              label: 'Daily P&L',
+              value: `${metrics.dailyPnl >= 0 ? '+' : ''}${formatUsd(metrics.dailyPnl, '$0.00', true)}`,
+              change: `${metrics.dailyPnlPct >= 0 ? '+' : ''}${metrics.dailyPnlPct.toFixed(2)}%`,
+              color: metrics.dailyPnl >= 0 ? 'text-green-600' : 'text-red-600',
+            },
+            {
+              label: 'Open Positions',
+              value: metrics.openPositions.toString(),
+              change: `${metrics.riskExposure.toFixed(1)}% exposure`,
+              color: 'text-blue-600',
+            },
+            {
+              label: 'Win Rate',
+              value: `${metrics.winRate.toFixed(1)}%`,
+              change: `${metrics.totalTrades} trades`,
+              color: metrics.winRate >= 60 ? 'text-green-600' : 'text-yellow-600',
+            },
           ].map((card) => (
-            <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <div
+              key={card.label}
+              className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+            >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{card.label}</span>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {card.label}
+                </span>
               </div>
               <div className="mt-2">
-                <span className="text-xl font-bold text-gray-900 dark:text-white">{card.value}</span>
+                <span className="text-xl font-bold text-gray-900 dark:text-white">
+                  {card.value}
+                </span>
               </div>
               <div className="mt-1">
                 <span className={`text-xs ${card.color}`}>{card.change}</span>
@@ -1289,7 +1501,10 @@ export default function Home() {
                     className="flex-1 mx-0.5 transition-all duration-300"
                     style={{ height: `${Math.max(height, 2)}%` }}
                   >
-                    <div className={`w-full rounded-t ${trend >= 0 ? 'bg-green-500' : 'bg-red-500'}`} style={{ height: '100%' }} />
+                    <div
+                      className={`w-full rounded-t ${trend >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
+                      style={{ height: '100%' }}
+                    />
                   </div>
                 );
               })}
@@ -1302,8 +1517,12 @@ export default function Home() {
           <div className="lg:col-span-2">
             <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Open Positions</h3>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{positions.length} positions</span>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Open Positions
+                </h3>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {positions.length} positions
+                </span>
               </div>
               {positions.length === 0 ? (
                 <div className="py-8 text-center text-gray-500 dark:text-gray-400 text-sm">
@@ -1315,36 +1534,60 @@ export default function Home() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800">
-                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Side</th>
-                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Entry</th>
-                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">P&L</th>
-                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Duration</th>
-                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Action</th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          Symbol
+                        </th>
+                        <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          Side
+                        </th>
+                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          Entry
+                        </th>
+                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          P&L
+                        </th>
+                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          Duration
+                        </th>
+                        <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          Action
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {positions.map((pos) => (
-                        <tr key={pos.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                          <td className="py-2 px-2 font-medium text-gray-900 dark:text-white">{pos.symbol}</td>
+                        <tr
+                          key={pos.id}
+                          className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                        >
+                          <td className="py-2 px-2 font-medium text-gray-900 dark:text-white">
+                            {pos.symbol}
+                          </td>
                           <td className="py-2 px-2">
-                            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                              pos.side === 'LONG' 
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                            }`}>
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-bold ${
+                                pos.side === 'LONG'
+                                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                              }`}
+                            >
                               {pos.side}
                             </span>
                           </td>
                           <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
                             ${formatPrice(pos.entryPrice)}
                           </td>
-                          <td className={`py-2 px-2 text-right font-mono text-xs font-bold ${
-                            pos.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                          }`}>
+                          <td
+                            className={`py-2 px-2 text-right font-mono text-xs font-bold ${
+                              pos.pnl >= 0
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-red-600 dark:text-red-400'
+                            }`}
+                          >
                             {pos.pnl >= 0 ? '+' : ''}${pos.pnl.toFixed(2)}
                             <span className="text-[10px] ml-1 opacity-70">
-                              ({pos.pnlPct >= 0 ? '+' : ''}{pos.pnlPct.toFixed(2)}%)
+                              ({pos.pnlPct >= 0 ? '+' : ''}
+                              {pos.pnlPct.toFixed(2)}%)
                             </span>
                           </td>
                           <td className="py-2 px-2 text-right text-xs text-gray-500 dark:text-gray-400 font-mono">
@@ -1375,10 +1618,16 @@ export default function Home() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Status</span>
-                  <span className={`text-xs font-medium flex items-center gap-1 ${
-                    botStatus.isRunning ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'
-                  }`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${botStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                  <span
+                    className={`text-xs font-medium flex items-center gap-1 ${
+                      botStatus.isRunning
+                        ? 'text-green-600 dark:text-green-400'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    <div
+                      className={`w-1.5 h-1.5 rounded-full ${botStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}
+                    />
                     {botStatus.isRunning ? 'Running' : 'Stopped'}
                   </span>
                 </div>
@@ -1405,13 +1654,17 @@ export default function Home() {
                         : 'border-gray-300 bg-gray-100 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400'
                     }`}
                   >
-                    <span className={`mr-2 h-2 w-2 rounded-full ${botStatus.autoTradingEnabled ? 'bg-green-500' : 'bg-gray-400'}`} />
+                    <span
+                      className={`mr-2 h-2 w-2 rounded-full ${botStatus.autoTradingEnabled ? 'bg-green-500' : 'bg-gray-400'}`}
+                    />
                     {botStatus.autoTradingEnabled ? 'Enabled' : 'Disabled'}
                   </button>
                 </div>
                 <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Uptime</span>
-                  <span className="text-xs font-mono text-gray-900 dark:text-white">{botStatus.uptime}</span>
+                  <span className="text-xs font-mono text-gray-900 dark:text-white">
+                    {botStatus.uptime}
+                  </span>
                 </div>
                 <div className="flex gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                   {botStatus.isRunning ? (
@@ -1447,7 +1700,7 @@ export default function Home() {
                   Signal Feed
                 </h3>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {signals.filter(s => s.status === 'live').length} live
+                  {signals.filter((s) => s.status === 'live').length} live
                 </span>
               </div>
               <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
@@ -1460,34 +1713,49 @@ export default function Home() {
                     <div key={signal.id} className="p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-gray-900 dark:text-white">{signal.symbol}</span>
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                            signal.direction === 'LONG' 
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                              : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                          }`}>
+                          <span className="text-xs font-bold text-gray-900 dark:text-white">
+                            {signal.symbol}
+                          </span>
+                          <span
+                            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                              signal.direction === 'LONG'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                            }`}
+                          >
                             {signal.direction}
                           </span>
-                          <span className="text-[10px] text-gray-500 dark:text-gray-400">{signal.timeframe}</span>
-                          <span className={`text-[10px] ${signal.change24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {signal.change24h >= 0 ? '+' : ''}{signal.change24h.toFixed(1)}%
+                          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                            {signal.timeframe}
+                          </span>
+                          <span
+                            className={`text-[10px] ${signal.change24h >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                          >
+                            {signal.change24h >= 0 ? '+' : ''}
+                            {signal.change24h.toFixed(1)}%
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`text-xs font-bold ${
-                            signal.confidence >= 85 ? 'text-green-600 dark:text-green-400' :
-                            signal.confidence >= 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                            'text-gray-500 dark:text-gray-400'
-                          }`}>
+                          <span
+                            className={`text-xs font-bold ${
+                              signal.confidence >= 85
+                                ? 'text-green-600 dark:text-green-400'
+                                : signal.confidence >= 75
+                                  ? 'text-yellow-600 dark:text-yellow-400'
+                                  : 'text-gray-500 dark:text-gray-400'
+                            }`}
+                          >
                             {signal.confidence}%
                           </span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                            signal.status === 'live' 
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                              : signal.status === 'pending'
-                              ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
-                          }`}>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              signal.status === 'live'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                : signal.status === 'pending'
+                                  ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                                  : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400'
+                            }`}
+                          >
                             {signal.status}
                           </span>
                         </div>
@@ -1509,9 +1777,9 @@ export default function Home() {
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                   <Bell size={14} className="text-yellow-600 dark:text-yellow-400" />
                   Alerts
-                  {alerts.filter(a => !a.read).length > 0 && (
+                  {alerts.filter((a) => !a.read).length > 0 && (
                     <span className="px-2 py-0.5 text-xs font-bold bg-red-500 text-white rounded-full">
-                      {alerts.filter(a => !a.read).length}
+                      {alerts.filter((a) => !a.read).length}
                     </span>
                   )}
                 </h3>
@@ -1523,10 +1791,14 @@ export default function Home() {
                   </div>
                 ) : (
                   alerts.slice(0, 5).map((alert) => (
-                    <div key={alert.id} className={`p-2 rounded-lg border ${
-                      !alert.read ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800' : 
-                      'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'
-                    }`}>
+                    <div
+                      key={alert.id}
+                      className={`p-2 rounded-lg border ${
+                        !alert.read
+                          ? 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800'
+                          : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700'
+                      }`}
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-medium text-gray-900 dark:text-white">
@@ -1542,14 +1814,20 @@ export default function Home() {
                         <div className="flex items-center gap-1 shrink-0">
                           {!alert.read && (
                             <button
-                              onClick={() => setAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, read: true } : a))}
+                              onClick={() =>
+                                setAlerts((prev) =>
+                                  prev.map((a) => (a.id === alert.id ? { ...a, read: true } : a))
+                                )
+                              }
                               className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors"
                             >
                               <CheckCircle size={12} />
                             </button>
                           )}
                           <button
-                            onClick={() => setAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                            onClick={() =>
+                              setAlerts((prev) => prev.filter((a) => a.id !== alert.id))
+                            }
                             className="p-0.5 text-gray-400 hover:text-red-600 transition-colors"
                           >
                             <X size={12} />

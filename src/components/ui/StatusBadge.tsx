@@ -1,7 +1,24 @@
 import React from 'react';
 
 type BadgeVariant =
-  | 'active' |'pending' |'confirmed' |'executed' |'tp1_hit' |'tp2_hit' |'sl_hit' |'expired' |'long' |'short' |'paper' |'live' |'trending' |'ranging' |'volatile' |'warning' |'error' |'info';
+  | 'active'
+  | 'pending'
+  | 'confirmed'
+  | 'executed'
+  | 'tp1_hit'
+  | 'tp2_hit'
+  | 'sl_hit'
+  | 'expired'
+  | 'long'
+  | 'short'
+  | 'paper'
+  | 'live'
+  | 'trending'
+  | 'ranging'
+  | 'volatile'
+  | 'warning'
+  | 'error'
+  | 'info';
 
 const VARIANT_CLASSES: Record<BadgeVariant, string> = {
   active: 'bg-positive-subtle text-positive border-positive/20',
@@ -72,12 +89,20 @@ export default function StatusBadge({
       {dot && (
         <span
           className={`w-1.5 h-1.5 rounded-full ${
-            variant === 'active' || variant === 'long' || variant === 'executed' || variant === 'tp1_hit' || variant === 'tp2_hit'
+            variant === 'active' ||
+            variant === 'long' ||
+            variant === 'executed' ||
+            variant === 'tp1_hit' ||
+            variant === 'tp2_hit'
               ? 'bg-positive'
-              : variant === 'sl_hit' || variant === 'short' || variant === 'volatile' || variant === 'error'
-              ? 'bg-negative'
-              : variant === 'warning' || variant === 'ranging'
-              ? 'bg-warning' :'bg-info'
+              : variant === 'sl_hit' ||
+                  variant === 'short' ||
+                  variant === 'volatile' ||
+                  variant === 'error'
+                ? 'bg-negative'
+                : variant === 'warning' || variant === 'ranging'
+                  ? 'bg-warning'
+                  : 'bg-info'
           }`}
         />
       )}

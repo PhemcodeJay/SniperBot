@@ -25,7 +25,7 @@ export default function ErrorBoundary({ children }: ErrorBoundaryProps) {
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
       console.error('Global error:', event.error);
-      setState(prev => ({
+      setState((prev) => ({
         hasError: true,
         error: event.error,
         errorCount: prev.errorCount + 1,
@@ -34,7 +34,7 @@ export default function ErrorBoundary({ children }: ErrorBoundaryProps) {
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       console.error('Unhandled promise rejection:', event.reason);
-      setState(prev => ({
+      setState((prev) => ({
         hasError: true,
         error: new Error(String(event.reason)),
         errorCount: prev.errorCount + 1,

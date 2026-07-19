@@ -38,13 +38,17 @@ const safeJsonParse = async (response: Response) => {
 // ============== API FUNCTIONS ==============
 
 // Fetch kline data
-const fetchKline = async (symbol: string = 'BTCUSDT', interval: string = 'D', limit: number = 30): Promise<any[]> => {
+const fetchKline = async (
+  symbol: string = 'BTCUSDT',
+  interval: string = 'D',
+  limit: number = 30
+): Promise<any[]> => {
   try {
     const response = await fetch(
       `${BYBIT_BASE_URL}/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
     );
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0 && data?.result?.list) {
       return data.result.list;
     }
@@ -58,9 +62,11 @@ const fetchKline = async (symbol: string = 'BTCUSDT', interval: string = 'D', li
 // Fetch current price
 const fetchCurrentPrice = async (): Promise<number> => {
   try {
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=BTCUSDT`);
+    const response = await fetch(
+      `${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=BTCUSDT`
+    );
     const result = await safeJsonParse(response);
-    
+
     if (result && result.retCode === 0 && result.result?.list?.length > 0) {
       return parseFloat(result.result.list[0].lastPrice);
     }
@@ -109,22 +115,22 @@ export default function MonthlyHeatmap() {
 
       // Fetch daily kline data for the current month (30 days)
       const klines = await fetchKline('BTCUSDT', 'D', 30);
-      
+
       if (klines.length === 0) {
         throw new Error('No kline data available');
       }
-      
+
       const now = new Date();
       const currentMonth = now.getMonth();
       const currentYear = now.getFullYear();
       const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      
+
       // Get current price for today's update
       const currentPrice = await fetchCurrentPrice();
-      
+
       // Get the first day of the month to calculate starting weekday
       const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
-      
+
       const cells: HeatmapCell[] = [];
       let totalPnl = 0;
       let winDays = 0;
@@ -132,7 +138,7 @@ export default function MonthlyHeatmap() {
       let totalTrades = 0;
       let bestDay = -Infinity;
       let worstDay = Infinity;
-      
+
       // Create map of day -> kline data
       const klineMap = new Map<number, any>();
       klines.forEach((k: any) => {
@@ -140,15 +146,15 @@ export default function MonthlyHeatmap() {
         const day = date.getDate();
         klineMap.set(day, k);
       });
-      
+
       // Build calendar for the month
       for (let day = 1; day <= daysInMonth; day++) {
         const kline = klineMap.get(day);
         const isToday = day === now.getDate();
-        
+
         if (kline || isToday) {
           let open: number, close: number, high: number, low: number, volume: number;
-          
+
           if (isToday && currentPrice > 0) {
             // Use today's data from kline if available, else use current price
             if (kline) {
@@ -175,30 +181,30 @@ export default function MonthlyHeatmap() {
           } else {
             continue;
           }
-          
+
           // Calculate actual price change
           const change = open > 0 ? ((close - open) / open) * 100 : 0;
           const volatility = open > 0 ? ((high - low) / open) * 100 : 0;
-          
+
           // Calculate P&L based on price movement
           const pnlPct = change * (0.5 + volatility * 0.1);
           const roundedPnl = Math.round(pnlPct * 100) / 100;
-          
+
           // Calculate trade count based on volume and volatility
           const tradeCount = Math.max(1, Math.round(5 + Math.abs(change) * 0.3 + volume / 1e8));
-          
+
           cells.push({
             day: day,
             pnlPct: roundedPnl,
             trades: tradeCount,
             priceChange: change,
           });
-          
+
           totalPnl += roundedPnl;
           totalTrades += tradeCount;
           if (roundedPnl > 0) winDays++;
           tradingDays++;
-          
+
           if (roundedPnl > bestDay) bestDay = roundedPnl;
           if (roundedPnl < worstDay) worstDay = roundedPnl;
         } else {
@@ -211,7 +217,7 @@ export default function MonthlyHeatmap() {
           });
         }
       }
-      
+
       setData(cells);
       setStats({
         totalPnl: Math.round(totalPnl * 100) / 100,
@@ -221,7 +227,7 @@ export default function MonthlyHeatmap() {
         bestDay: bestDay !== -Infinity ? Math.round(bestDay * 100) / 100 : 0,
         worstDay: worstDay !== Infinity ? Math.round(worstDay * 100) / 100 : 0,
       });
-      
+
       setError(null);
     } catch (error) {
       console.error('Failed to fetch heatmap data:', error);
@@ -269,10 +275,7 @@ export default function MonthlyHeatmap() {
   const now = new Date();
   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getDay();
   const START_DOW = firstDayOfMonth;
-  const cells: (HeatmapCell | null)[] = [
-    ...Array.from({ length: START_DOW }, () => null),
-    ...data,
-  ];
+  const cells: (HeatmapCell | null)[] = [...Array.from({ length: START_DOW }, () => null), ...data];
 
   const monthName = now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
@@ -280,9 +283,7 @@ export default function MonthlyHeatmap() {
     <div className="card-surface p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            Monthly P&L Heatmap
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground">Monthly P&L Heatmap</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {monthName} · Based on BTC daily price action
           </p>
@@ -290,8 +291,11 @@ export default function MonthlyHeatmap() {
         <div className="flex items-center gap-4 text-xs">
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Month P&L</p>
-            <p className={`font-bold font-tabular ${stats.totalPnl >= 0 ? 'text-positive' : 'text-negative'}`}>
-              {stats.totalPnl >= 0 ? '+' : ''}{stats.totalPnl.toFixed(2)}%
+            <p
+              className={`font-bold font-tabular ${stats.totalPnl >= 0 ? 'text-positive' : 'text-negative'}`}
+            >
+              {stats.totalPnl >= 0 ? '+' : ''}
+              {stats.totalPnl.toFixed(2)}%
             </p>
           </div>
           <div className="text-right">
@@ -319,12 +323,7 @@ export default function MonthlyHeatmap() {
       <div className="grid grid-cols-7 gap-1">
         {cells.map((cell, i) => {
           if (!cell) {
-            return (
-              <div
-                key={`empty-cell-${i}`}
-                className="aspect-square rounded-md"
-              />
-            );
+            return <div key={`empty-cell-${i}`} className="aspect-square rounded-md" />;
           }
           const cls = getHeatmapClass(cell.pnlPct);
           const isToday = cell.day === now.getDate() && cell.pnlPct !== null;
@@ -343,18 +342,14 @@ export default function MonthlyHeatmap() {
                   : `${monthName} ${cell.day}: No trading data`
               }
             >
-              <span className="text-[10px] font-semibold leading-none">
-                {cell.day}
-              </span>
+              <span className="text-[10px] font-semibold leading-none">{cell.day}</span>
               {cell.pnlPct !== null && (
                 <span className="text-[8px] font-mono leading-none mt-0.5 opacity-90">
                   {cell.pnlPct >= 0 ? '+' : ''}
                   {cell.pnlPct.toFixed(1)}%
                 </span>
               )}
-              {isToday && (
-                <span className="text-[6px] font-mono mt-0.5 text-primary">●</span>
-              )}
+              {isToday && <span className="text-[6px] font-mono mt-0.5 text-primary">●</span>}
             </div>
           );
         })}
@@ -389,17 +384,14 @@ export default function MonthlyHeatmap() {
             'bg-green-300/50',
             'bg-green-500/70',
           ].map((cls, i) => (
-            <div
-              key={`legend-swatch-${i}`}
-              className={`w-5 h-3 rounded-sm ${cls}`}
-            />
+            <div key={`legend-swatch-${i}`} className={`w-5 h-3 rounded-sm ${cls}`} />
           ))}
         </div>
         <span className="text-[10px] text-muted-foreground">Gain</span>
       </div>
 
       <div className="mt-2 text-[9px] text-muted-foreground">
-        <span className="text-muted-foreground">Data source:</span> Bybit BTCUSDT daily klines · 
+        <span className="text-muted-foreground">Data source:</span> Bybit BTCUSDT daily klines ·
         <span className="ml-1">P&L based on daily price action</span>
       </div>
     </div>

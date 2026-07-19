@@ -4,15 +4,40 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
-import { BYBIT_BASE_URL, createBybitAuthHeaders, fetchBybitWalletBalance, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import {
+  BYBIT_BASE_URL,
+  createBybitAuthHeaders,
+  fetchBybitWalletBalance,
+  getBybitCredentials,
+  safeJsonParse,
+} from '@/lib/bybit';
 import { formatUsd } from '@/lib/formatters';
 import { useSharedRealtimeData } from '@/lib/realtimeDataContext';
-import { calculateLivePnl, getSharedTradingState, setSharedMetrics, subscribeToSharedTradingState } from '@/lib/tradingState';
-import { 
-  TrendingUp, TrendingDown, DollarSign, Activity, 
-  BarChart3, Clock, Calendar, RefreshCw, Download,
-  Filter, ChevronDown, Maximize2, Loader2, Wifi, WifiOff,
-  X, AlertCircle, Wallet
+import {
+  calculateLivePnl,
+  getSharedTradingState,
+  setSharedMetrics,
+  subscribeToSharedTradingState,
+} from '@/lib/tradingState';
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Activity,
+  BarChart3,
+  Clock,
+  Calendar,
+  RefreshCw,
+  Download,
+  Filter,
+  ChevronDown,
+  Maximize2,
+  Loader2,
+  Wifi,
+  WifiOff,
+  X,
+  AlertCircle,
+  Wallet,
 } from 'lucide-react';
 import { realtimeManager } from '@/lib/realtimeManager';
 
@@ -65,7 +90,15 @@ interface InstrumentData {
 // ============== BYBIT API CONFIG ==============
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
-const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+const SUPPORTED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'ADAUSDT',
+  'DOGEUSDT',
+];
 
 // ============== API HELPERS ==============
 const getApiCredentials = () => getBybitCredentials();
@@ -83,7 +116,12 @@ const fetchWalletBalance = async (): Promise<{ totalEquity: number; availableBal
     const wallet = await fetchBybitWalletBalance(apiKey, apiSecret);
     return {
       totalEquity: wallet.totalEquity > 0 ? wallet.totalEquity : 100,
-      availableBalance: wallet.availableBalance > 0 ? wallet.availableBalance : wallet.totalEquity > 0 ? wallet.totalEquity : 100,
+      availableBalance:
+        wallet.availableBalance > 0
+          ? wallet.availableBalance
+          : wallet.totalEquity > 0
+            ? wallet.totalEquity
+            : 100,
     };
   } catch (error) {
     console.error('Error fetching wallet balance:', error);
@@ -101,10 +139,13 @@ const fetchPositions = async (): Promise<any[]> => {
     const params = '';
     const headers = await createBybitAuthHeaders(apiKey, apiSecret, params, recvWindow);
 
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/position/list?category=linear&accountType=UNIFIED&settleCoin=USDT`, {
-      method: 'GET',
-      headers,
-    });
+    const response = await fetch(
+      `${BYBIT_BASE_URL}/v5/position/list?category=linear&accountType=UNIFIED&settleCoin=USDT`,
+      {
+        method: 'GET',
+        headers,
+      }
+    );
 
     const data = await safeJsonParse(response);
     if (data?.retCode === 0 && data?.result?.list) {
@@ -146,22 +187,22 @@ const fetchOrderHistory = async (): Promise<any[]> => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -175,11 +216,15 @@ export default function PerformanceAnalyticsPage() {
   const { data: realtimeData } = useSharedRealtimeData();
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'connected' | 'disconnected' | 'connecting' | 'error'
+  >('connecting');
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [equityData, setEquityData] = useState<EquityPoint[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
-  const [regimeData, setRegimeData] = useState<{ regime: string; winRate: number; trades: number }[]>([]);
+  const [regimeData, setRegimeData] = useState<
+    { regime: string; winRate: number; trades: number }[]
+  >([]);
   const [instrumentData, setInstrumentData] = useState<InstrumentData[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [baseEquity, setBaseEquity] = useState<number>(100);
@@ -198,30 +243,49 @@ export default function PerformanceAnalyticsPage() {
   useEffect(() => {
     const unsubscribe = subscribeToSharedTradingState((state) => {
       setTotalPnl(state.metrics.totalPnl);
-      setMetrics(prev => prev ? ({ ...prev, totalPnl: state.metrics.totalPnl, dailyPnl: state.metrics.dailyPnl, totalTrades: state.metrics.totalTrades, winRate: state.metrics.winRate }) : prev);
+      setMetrics((prev) =>
+        prev
+          ? {
+              ...prev,
+              totalPnl: state.metrics.totalPnl,
+              dailyPnl: state.metrics.dailyPnl,
+              totalTrades: state.metrics.totalTrades,
+              winRate: state.metrics.winRate,
+            }
+          : prev
+      );
     });
-    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      // Cleanup - calling unsubscribe returns void, so we don't return its value
+      const unsub = subscribeToSharedTradingState(() => null);
+      // The unsubscribe function from subscribeToSharedTradingState already handles cleanup
+    };
   }, []);
 
   // Calculate performance metrics from real data
   const calculateMetrics = (
-    positions: any[], 
-    orders: any[], 
+    positions: any[],
+    orders: any[],
     totalEquity: number,
     baseEquityValue: number
   ): PerformanceMetrics => {
-    const totalReturn = baseEquityValue > 0 ? ((totalEquity - baseEquityValue) / baseEquityValue) * 100 : 0;
-    
-    let wins = 0, losses = 0;
-    let winSum = 0, lossSum = 0;
-    let bestTrade = 0, worstTrade = 0;
+    const totalReturn =
+      baseEquityValue > 0 ? ((totalEquity - baseEquityValue) / baseEquityValue) * 100 : 0;
+
+    let wins = 0,
+      losses = 0;
+    let winSum = 0,
+      lossSum = 0;
+    let bestTrade = 0,
+      worstTrade = 0;
     let totalPnlValue = 0;
 
     // Calculate from closed trades
     orders.forEach((order: any) => {
       const pnl = parseFloat(order.pnl || 0);
       totalPnlValue += pnl;
-      
+
       if (pnl > 0) {
         wins++;
         winSum += pnl;
@@ -236,7 +300,12 @@ export default function PerformanceAnalyticsPage() {
     // Add unrealized P&L from positions using the latest ticker price
     positions.forEach((pos: any) => {
       const currentPrice = parseFloat(pos.markPrice || pos.currentPrice || pos.entryPrice || 0);
-      const { pnl } = calculateLivePnl(parseFloat(pos.avgPrice || pos.entryPrice || 0), currentPrice, Math.abs(parseFloat(pos.size || 0)), pos.side === 'Sell' || pos.side === 'SHORT' ? 'SHORT' : 'LONG');
+      const { pnl } = calculateLivePnl(
+        parseFloat(pos.avgPrice || pos.entryPrice || 0),
+        currentPrice,
+        Math.abs(parseFloat(pos.size || 0)),
+        pos.side === 'Sell' || pos.side === 'SHORT' ? 'SHORT' : 'LONG'
+      );
       totalPnlValue += pnl;
     });
 
@@ -250,16 +319,16 @@ export default function PerformanceAnalyticsPage() {
     let maxDrawdown = 0;
     let peak = baseEquityValue;
     let currentEquityTracker = baseEquityValue;
-    
+
     // Calculate drawdown based on order history
     orders.forEach((order: any) => {
       const orderPnl = parseFloat(order.pnl || 0);
       currentEquityTracker += orderPnl;
-      
+
       if (currentEquityTracker > peak) {
         peak = currentEquityTracker;
       }
-      
+
       const drawdown = ((currentEquityTracker - peak) / peak) * 100;
       if (drawdown < maxDrawdown) {
         maxDrawdown = drawdown;
@@ -282,7 +351,10 @@ export default function PerformanceAnalyticsPage() {
       totalReturn: Math.round(totalReturn * 100) / 100,
       winRate: Math.round(winRate * 10) / 10,
       profitFactor: Math.round(profitFactor * 100) / 100,
-      sharpeRatio: profitFactor > 0 ? Math.round((Math.log(profitFactor) / Math.sqrt(Math.max(1, totalTrades))) * 100) / 100 : 0,
+      sharpeRatio:
+        profitFactor > 0
+          ? Math.round((Math.log(profitFactor) / Math.sqrt(Math.max(1, totalTrades))) * 100) / 100
+          : 0,
       maxDrawdown: Math.round(maxDrawdown * 100) / 100,
       totalTrades: Math.max(totalTrades, 0),
       winningTrades: wins,
@@ -291,7 +363,10 @@ export default function PerformanceAnalyticsPage() {
       avgLoss: Math.round(avgLoss * 100) / 100,
       bestTrade: Math.round(bestTrade * 100) / 100,
       worstTrade: Math.round(worstTrade * 100) / 100,
-      avgTradeDuration: totalTrades > 0 ? `${Math.floor(totalTrades / 4)}h ${Math.floor(totalTrades * 15 % 60)}m` : '0h 0m',
+      avgTradeDuration:
+        totalTrades > 0
+          ? `${Math.floor(totalTrades / 4)}h ${Math.floor((totalTrades * 15) % 60)}m`
+          : '0h 0m',
       totalPnl: Math.round(totalPnlValue * 100) / 100,
       currentEquity: Math.round(totalEquity * 100) / 100,
       baseEquity: Math.round(baseEquityValue * 100) / 100,
@@ -311,7 +386,7 @@ export default function PerformanceAnalyticsPage() {
       setError(null);
 
       const hasKeys = hasValidCredentials();
-      
+
       if (!hasKeys) {
         setIsApiConnected(false);
         setError('API credentials not configured');
@@ -327,11 +402,12 @@ export default function PerformanceAnalyticsPage() {
         fetchTickers(SUPPORTED_SYMBOLS),
       ]);
 
-      const currentEquity = realtimeData?.balance?.totalEquity > 0
-        ? realtimeData.balance.totalEquity
-        : wallet.totalEquity;
+      const currentEquity =
+        realtimeData?.balance?.totalEquity && realtimeData.balance.totalEquity > 0
+          ? realtimeData.balance.totalEquity
+          : wallet.totalEquity;
       const baseEquityValue = 100; // Starting equity
-      
+
       setBaseEquity(baseEquityValue);
       setTotalPnl(currentEquity - baseEquityValue);
       setIsApiConnected(true);
@@ -347,7 +423,6 @@ export default function PerformanceAnalyticsPage() {
       setInstrumentData([]);
 
       setError(null);
-
     } catch (err: any) {
       console.error('Error fetching analytics data:', err);
       setError(err.message || 'Failed to fetch data');
@@ -357,7 +432,9 @@ export default function PerformanceAnalyticsPage() {
     }
   }, [hasValidCredentials, realtimeData]);
 
-  const disconnectWebSocket = useCallback(() => { /* noop - singleton manages WS */ }, []);
+  const disconnectWebSocket = useCallback(() => {
+    /* noop - singleton manages WS */
+  }, []);
   const lastAnalyticsRefreshRef = useRef<number>(0);
   const ANALYTICS_REFRESH_MS = 60000;
 
@@ -413,12 +490,12 @@ export default function PerformanceAnalyticsPage() {
           <div className="animate-pulse">
             <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded mb-4" />
             <div className="grid grid-cols-4 gap-4 mb-6">
-              {[1, 2, 3, 4].map(i => (
+              {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="h-24 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
             <div className="grid grid-cols-3 gap-6">
-              {[1, 2, 3].map(i => (
+              {[1, 2, 3].map((i) => (
                 <div key={i} className="h-64 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
@@ -461,37 +538,47 @@ export default function PerformanceAnalyticsPage() {
                 ) : (
                   <WifiOff size={14} className="text-gray-500" />
                 )}
-                <span className={`capitalize ${
-                  connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
-                  connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
-                  'text-gray-500 dark:text-gray-400'
-                }`}>
+                <span
+                  className={`capitalize ${
+                    connectionStatus === 'connected'
+                      ? 'text-green-600 dark:text-green-400'
+                      : connectionStatus === 'error'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
                   {connectionStatus}
                 </span>
               </span>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 dark:bg-green-900/30 rounded-lg">
               <Wallet size={14} className="text-green-600 dark:text-green-400" />
               <span className="text-xs font-medium text-green-700 dark:text-green-400">
-                Total P&L: {totalPnl >= 0 ? '+' : ''}{formatUsd(totalPnl, '$0.00', true)}
+                Total P&L: {totalPnl >= 0 ? '+' : ''}
+                {formatUsd(totalPnl, '$0.00', true)}
               </span>
             </div>
-            {realtimeData?.balance?.totalEquity > 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                <Wallet size={14} className="text-blue-600 dark:text-blue-400" />
-                <span className="text-xs font-medium text-blue-700 dark:text-blue-400">
-                  Account Equity: {formatUsd(realtimeData.balance.totalEquity, '$0.00', true)}
-                </span>
-              </div>
-            )}
-            <button 
-              onClick={handleRefresh} 
+            {realtimeData &&
+              realtimeData.balance?.totalEquity &&
+              realtimeData.balance.totalEquity > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <Wallet size={14} className="text-blue-600 dark:text-blue-400" />
+                  <span className="text-xs font-medium text-blue-700 dark:text-blue-400">
+                    Account Equity: {formatUsd(realtimeData.balance.totalEquity, '$0.00', true)}
+                  </span>
+                </div>
+              )}
+            <button
+              onClick={handleRefresh}
               disabled={isRefreshing}
               className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={16} className={`text-gray-600 dark:text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                size={16}
+                className={`text-gray-600 dark:text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`}
+              />
             </button>
           </div>
         </div>
@@ -500,17 +587,44 @@ export default function PerformanceAnalyticsPage() {
         {metrics && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total P&L', value: formatUsd(metrics.totalPnl, '$0.00', true), change: `${metrics.totalReturn >= 0 ? '+' : ''}${metrics.totalReturn.toFixed(1)}%`, color: metrics.totalReturn >= 0 ? 'text-green-600' : 'text-red-600' },
-              { label: 'Win Rate', value: `${metrics.winRate.toFixed(1)}%`, change: `${metrics.winningTrades}/${metrics.totalTrades} trades`, color: 'text-blue-600' },
-              { label: 'Profit Factor', value: metrics.profitFactor.toFixed(2), change: `Sharpe ${metrics.sharpeRatio.toFixed(2)}`, color: 'text-purple-600' },
-              { label: 'Max Drawdown', value: `${metrics.maxDrawdown.toFixed(1)}%`, change: `Equity ${formatUsd(metrics.currentEquity, '$0.00', true)}`, color: metrics.maxDrawdown > -5 ? 'text-green-600' : 'text-red-600' },
+              {
+                label: 'Total P&L',
+                value: formatUsd(metrics.totalPnl, '$0.00', true),
+                change: `${metrics.totalReturn >= 0 ? '+' : ''}${metrics.totalReturn.toFixed(1)}%`,
+                color: metrics.totalReturn >= 0 ? 'text-green-600' : 'text-red-600',
+              },
+              {
+                label: 'Win Rate',
+                value: `${metrics.winRate.toFixed(1)}%`,
+                change: `${metrics.winningTrades}/${metrics.totalTrades} trades`,
+                color: 'text-blue-600',
+              },
+              {
+                label: 'Profit Factor',
+                value: metrics.profitFactor.toFixed(2),
+                change: `Sharpe ${metrics.sharpeRatio.toFixed(2)}`,
+                color: 'text-purple-600',
+              },
+              {
+                label: 'Max Drawdown',
+                value: `${metrics.maxDrawdown.toFixed(1)}%`,
+                change: `Equity ${formatUsd(metrics.currentEquity, '$0.00', true)}`,
+                color: metrics.maxDrawdown > -5 ? 'text-green-600' : 'text-red-600',
+              },
             ].map((card) => (
-              <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+              <div
+                key={card.label}
+                className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+              >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">{card.label}</span>
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {card.label}
+                  </span>
                 </div>
                 <div className="mt-2">
-                  <span className="text-xl font-bold text-gray-900 dark:text-white">{card.value}</span>
+                  <span className="text-xl font-bold text-gray-900 dark:text-white">
+                    {card.value}
+                  </span>
                 </div>
                 <div className="mt-1">
                   <span className={`text-xs ${card.color}`}>{card.change}</span>
@@ -530,8 +644,8 @@ export default function PerformanceAnalyticsPage() {
             <div className="h-48 relative">
               <div className="absolute inset-0 flex items-end">
                 {equityData.map((point, i) => {
-                  const max = Math.max(...equityData.map(d => d.equity));
-                  const min = Math.min(...equityData.map(d => d.equity));
+                  const max = Math.max(...equityData.map((d) => d.equity));
+                  const min = Math.min(...equityData.map((d) => d.equity));
                   const range = max - min || 1;
                   const height = ((point.equity - min) / range) * 100;
                   const isPositive = point.pnl >= 0;
@@ -550,26 +664,35 @@ export default function PerformanceAnalyticsPage() {
             </div>
           ) : (
             <div className="flex items-center justify-center h-48">
-              <span className="text-sm text-gray-500 dark:text-gray-400">No equity data available</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                No equity data available
+              </span>
             </div>
           )}
           <div className="flex justify-between mt-2 text-xs text-gray-500 dark:text-gray-400">
             <span>{equityData[0]?.date || '-'}</span>
-            <span>{metrics ? `$${Math.min(...equityData.map(d => d.equity)).toFixed(0)} - $${Math.max(...equityData.map(d => d.equity)).toFixed(0)}` : '-'}</span>
+            <span>
+              {metrics
+                ? `$${Math.min(...equityData.map((d) => d.equity)).toFixed(0)} - $${Math.max(...equityData.map((d) => d.equity)).toFixed(0)}`
+                : '-'}
+            </span>
             <span>{equityData[equityData.length - 1]?.date || '-'}</span>
           </div>
         </div>
 
         {/* Monthly Heatmap */}
         <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Monthly Performance</h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+            Monthly Performance
+          </h3>
           <div className="grid grid-cols-4 gap-1">
             {monthlyData.length > 0 ? (
               monthlyData.map((month) => {
                 const intensity = Math.min(Math.abs(month.pnl) / 15, 0.9);
-                const color = month.pnl >= 0 
-                  ? `rgba(34, 197, 94, ${intensity + 0.1})`
-                  : `rgba(239, 68, 68, ${intensity + 0.1})`;
+                const color =
+                  month.pnl >= 0
+                    ? `rgba(34, 197, 94, ${intensity + 0.1})`
+                    : `rgba(239, 68, 68, ${intensity + 0.1})`;
                 return (
                   <div
                     key={month.month}
@@ -577,54 +700,93 @@ export default function PerformanceAnalyticsPage() {
                     style={{ backgroundColor: color }}
                   >
                     <div className="text-xs font-semibold text-white">{month.month}</div>
-                    <div className="text-xs text-white/80">{month.pnl >= 0 ? '+' : ''}{month.pnl.toFixed(1)}%</div>
+                    <div className="text-xs text-white/80">
+                      {month.pnl >= 0 ? '+' : ''}
+                      {month.pnl.toFixed(1)}%
+                    </div>
                     <div className="text-[10px] text-white/60">{month.trades} trades</div>
                   </div>
                 );
               })
             ) : (
-              <div className="col-span-4 text-center py-4 text-gray-500 dark:text-gray-400">No monthly data available</div>
+              <div className="col-span-4 text-center py-4 text-gray-500 dark:text-gray-400">
+                No monthly data available
+              </div>
             )}
           </div>
         </div>
 
         {/* Instrument Performance */}
         <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Instrument Performance</h3>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+            Instrument Performance
+          </h3>
           {instrumentData.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Price</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">24h Change</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Volume</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Trades</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Win Rate</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">P&L</th>
+                    <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Symbol
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Price
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      24h Change
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Volume
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Trades
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Win Rate
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      P&L
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {instrumentData.map((inst) => (
-                    <tr key={inst.symbol} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                      <td className="py-2 px-2 font-medium text-gray-900 dark:text-white">{inst.symbol}</td>
+                    <tr
+                      key={inst.symbol}
+                      className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                    >
+                      <td className="py-2 px-2 font-medium text-gray-900 dark:text-white">
+                        {inst.symbol}
+                      </td>
                       <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-300">
                         ${inst.price.toFixed(2)}
                       </td>
-                      <td className={`py-2 px-2 text-right font-medium ${inst.change24h >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                        {inst.change24h >= 0 ? '+' : ''}{inst.change24h.toFixed(2)}%
+                      <td
+                        className={`py-2 px-2 text-right font-medium ${inst.change24h >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+                      >
+                        {inst.change24h >= 0 ? '+' : ''}
+                        {inst.change24h.toFixed(2)}%
                       </td>
                       <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-300">
                         ${(inst.volume / 1e6).toFixed(1)}M
                       </td>
-                      <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-300">{inst.trades}</td>
+                      <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-300">
+                        {inst.trades}
+                      </td>
                       <td className="py-2 px-2 text-right">
-                        <span className={inst.winRate >= 65 ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'}>
+                        <span
+                          className={
+                            inst.winRate >= 65
+                              ? 'text-green-600 dark:text-green-400'
+                              : 'text-yellow-600 dark:text-yellow-400'
+                          }
+                        >
                           {inst.winRate.toFixed(1)}%
                         </span>
                       </td>
-                      <td className={`py-2 px-2 text-right font-medium ${inst.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                      <td
+                        className={`py-2 px-2 text-right font-medium ${inst.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+                      >
                         ${inst.pnl.toFixed(2)}
                       </td>
                     </tr>

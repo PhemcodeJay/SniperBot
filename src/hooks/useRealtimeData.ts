@@ -42,11 +42,7 @@ export interface UseRealtimeDataOptions {
 const DEFAULT_POLL_INTERVAL = 30000; // 30 seconds to reduce API spam and improve performance
 
 export function useRealtimeData(options: UseRealtimeDataOptions = {}) {
-  const {
-    pollInterval = DEFAULT_POLL_INTERVAL,
-    enabled = true,
-    onError,
-  } = options;
+  const { pollInterval = DEFAULT_POLL_INTERVAL, enabled = true, onError } = options;
 
   const [data, setData] = useState<RealtimeData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,7 +65,6 @@ export function useRealtimeData(options: UseRealtimeDataOptions = {}) {
       if (isMountedRef.current) setLoading(false);
     }
   }, [enabled, onError]);
-
 
   useEffect(() => {
     isMountedRef.current = true;

@@ -91,25 +91,22 @@ async function validateRiskLimits(
     // Check position size
     const url = `${BYBIT_BASE_URL}/v5/position/list?category=linear`;
     const positionHeaders = await createBybitHeaders('');
-    const positionResponse = await requestManager.executeWithRateLimit(
-      url,
-      {
-        method: 'GET',
-        headers: positionHeaders,
-      }
-    );
+    const positionResponse = await requestManager.executeWithRateLimit<any>(url, {
+      method: 'GET',
+      headers: positionHeaders,
+    });
 
-    if (
-      positionResponse.retCode === 0 &&
-      positionResponse.result?.list
-    ) {
+    if (positionResponse && positionResponse.retCode === 0 && positionResponse.result?.list) {
       const existingPosition = positionResponse.result.list.find(
         (p: any) => p.symbol === symbol && p.side !== 'None'
       );
 
       const totalSize = (existingPosition?.size || 0) + qty;
       if (totalSize > MAX_POSITION_SIZE) {
-        return { allowed: false, reason: `Position size ${totalSize} exceeds max ${MAX_POSITION_SIZE}` };
+        return {
+          allowed: false,
+          reason: `Position size ${totalSize} exceeds max ${MAX_POSITION_SIZE}`,
+        };
       }
     }
 
@@ -123,16 +120,37 @@ async function validateRiskLimits(
   }
 }
 
-async function fetchInstrumentInfo(symbol: string) {
+interface InstrumentInfoResponse {
+  retCode: number;
+  retMsg: string;
+  result?: {
+    list?: Array<{
+      lotSizeFilter?: {
+        minOrderQty?: string | number;
+        qtyStep?: string | number;
+      };
+      lot_size_filter?: {
+        min_qty?: string | number;
+        step?: string | number;
+      };
+    }>;
+  };
+}
+
+async function fetchInstrumentInfo(
+  symbol: string
+): Promise<{ minOrderQty: number; qtyStep: number } | null> {
   try {
     const url = `${BYBIT_BASE_URL}/v5/market/instruments-info?category=linear&symbol=${encodeURIComponent(symbol)}`;
-    const resp = await requestManager.executeWithRateLimit(url, { method: 'GET' });
+    const resp = await requestManager.executeWithRateLimit<InstrumentInfoResponse>(url, {
+      method: 'GET',
+    });
     if (resp?.retCode !== 0) return null;
     const info = resp.result?.list?.[0];
     if (!info) return null;
 
     // Try multiple possible filter shapes
-    const lot = info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
+    const lot = (info.lotSizeFilter || info.lot_size_filter || {}) as Record<string, any>;
     const minOrderQty = parseFloat(lot.minOrderQty || lot.min_qty || lot.min || '0') || 0;
     const qtyStep = parseFloat(lot.qtyStep || lot.stepSize || lot.qty_step || lot.step || '0') || 0;
 
@@ -148,10 +166,7 @@ export async function POST(req: NextRequest) {
     // Check authentication if API_AUTH_TOKEN is configured
     const auth = checkAuth(req);
     if (!auth.authorized) {
-      return NextResponse.json(
-        { error: auth.reason },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: auth.reason }, { status: 401 });
     }
 
     const body: ExecuteOrderRequest = await req.json();
@@ -182,11 +197,9 @@ export async function POST(req: NextRequest) {
     // Check confidence threshold
     const minConfidence = parseFloat(process.env.AUTO_EXECUTE_MIN_CONFIDENCE || '0.8');
     if (confidence < minConfidence) {
-      logger.warn(
-        'AutoExecute',
-        `Signal confidence ${confidence} below minimum ${minConfidence}`,
-        { signalId }
-      );
+      logger.warn('AutoExecute', `Signal confidence ${confidence} below minimum ${minConfidence}`, {
+        signalId,
+      });
       return NextResponse.json(
         { error: `Confidence ${confidence} below minimum ${minConfidence}` },
         { status: 400 }
@@ -205,7 +218,10 @@ export async function POST(req: NextRequest) {
         } else {
           numericQty = minOrderQty;
         }
-        logger.info('AutoExecute', 'Adjusted order qty to meet exchange minimums', { symbol, adjustedQty: numericQty });
+        logger.info('AutoExecute', 'Adjusted order qty to meet exchange minimums', {
+          symbol,
+          adjustedQty: numericQty,
+        });
       }
     }
 
@@ -213,10 +229,7 @@ export async function POST(req: NextRequest) {
     const riskCheck = await validateRiskLimits(symbol, numericQty, side, orderType);
     if (!riskCheck.allowed) {
       logger.warn('AutoExecute', `Risk check failed: ${riskCheck.reason}`, { symbol, qty });
-      return NextResponse.json(
-        { error: riskCheck.reason },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: riskCheck.reason }, { status: 400 });
     }
 
     // Build order payload
@@ -255,7 +268,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Execute order on MAINNET
-    const response = await requestManager.executeWithRateLimit(
+    const response = await requestManager.executeWithRateLimit<any>(
       `${BYBIT_BASE_URL}/v5/order/create`,
       {
         method: 'POST',
@@ -268,15 +281,26 @@ export async function POST(req: NextRequest) {
 
     // If Bybit returned an error code, forward it to the caller for visibility
     if (response?.retCode !== undefined && response.retCode !== 0) {
-      logger.warn('AutoExecute', 'Bybit rejected order', { retCode: response.retCode, retMsg: response.retMsg, symbol });
+      logger.warn('AutoExecute', 'Bybit rejected order', {
+        retCode: response.retCode,
+        retMsg: response.retMsg,
+        symbol,
+      });
       return NextResponse.json(response, { status: 400 });
     }
 
     // Validate response schema
     const validation = parseOrderResponse(response);
     if (!validation.success) {
-      logger.error('AutoExecute', 'Invalid order response format', { symbol, signalId, errors: validation.error });
-      return NextResponse.json({ error: 'Invalid response from Bybit', details: validation.error }, { status: 500 });
+      logger.error('AutoExecute', 'Invalid order response format', {
+        symbol,
+        signalId,
+        errors: validation.error,
+      });
+      return NextResponse.json(
+        { error: 'Invalid response from Bybit', details: validation.error },
+        { status: 500 }
+      );
     }
 
     logger.info('AutoExecute', 'Order executed successfully', {
@@ -302,9 +326,6 @@ export async function POST(req: NextRequest) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     logger.error('AutoExecute', 'Failed to execute order', { error: message }, error as Error);
 
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -30,9 +30,5 @@ export function RealtimeDataProvider({ children, pollInterval = 2000 }: Realtime
     refetch,
   };
 
-  return (
-    <RealtimeDataContext.Provider value={value}>
-      {children}
-    </RealtimeDataContext.Provider>
-  );
+  return <RealtimeDataContext.Provider value={value}>{children}</RealtimeDataContext.Provider>;
 }

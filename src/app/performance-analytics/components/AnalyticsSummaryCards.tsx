@@ -67,11 +67,11 @@ export default function AnalyticsSummaryCards() {
         const ticker = result.result.list[0];
         const change24h = parseFloat(ticker.price24hPcnt) * 100;
         const volume = parseFloat(ticker.volume24h);
-        
+
         totalVolume += volume;
         avgChange += change24h;
         validCount++;
-        
+
         if (change24h > maxChange) maxChange = change24h;
         if (change24h < minChange) minChange = change24h;
       }
@@ -109,9 +109,9 @@ export default function AnalyticsSummaryCards() {
       setError(null);
 
       // Fetch ticker data for all symbols
-      const promises = SUPPORTED_SYMBOLS.map(symbol =>
+      const promises = SUPPORTED_SYMBOLS.map((symbol) =>
         fetch(`${BYBIT_API.spot}?category=linear&symbol=${symbol}`)
-          .then(r => r.json())
+          .then((r) => r.json())
           .catch(() => null)
       );
 
@@ -200,7 +200,7 @@ export default function AnalyticsSummaryCards() {
   if (isLoading) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 2xl:grid-cols-6 gap-4 mb-6">
-        {[1, 2, 3, 4, 5, 6].map(i => (
+        {[1, 2, 3, 4, 5, 6].map((i) => (
           <div key={i} className="card-surface p-4 flex items-center justify-center py-8">
             <Loader2 size={24} className="animate-spin text-primary" />
           </div>
@@ -239,7 +239,9 @@ export default function AnalyticsSummaryCards() {
               <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
                 {card.title}
               </span>
-              <div className={`w-7 h-7 rounded-md flex items-center justify-center ${VARIANT_ICON[card.variant]}`}>
+              <div
+                className={`w-7 h-7 rounded-md flex items-center justify-center ${VARIANT_ICON[card.variant]}`}
+              >
                 <Icon size={13} />
               </div>
             </div>
@@ -249,7 +251,9 @@ export default function AnalyticsSummaryCards() {
             <p className="text-[10px] text-muted-foreground leading-tight mb-1.5">
               {card.subValue}
             </p>
-            <p className={`text-[10px] font-semibold ${card.positive ? 'text-positive' : 'text-negative'}`}>
+            <p
+              className={`text-[10px] font-semibold ${card.positive ? 'text-positive' : 'text-negative'}`}
+            >
               {card.change}
             </p>
           </div>

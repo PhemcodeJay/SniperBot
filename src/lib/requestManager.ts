@@ -91,7 +91,7 @@ class RequestManager {
     }
 
     this.lastRequestTime = Date.now();
-    return this.executeWithRetry(url, options, config);
+    return this.executeWithRetry(url, options, config) as Promise<T>;
   }
 
   private async executeWithTimeout(
@@ -113,7 +113,7 @@ class RequestManager {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

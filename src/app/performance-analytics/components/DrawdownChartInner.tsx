@@ -47,13 +47,17 @@ const safeJsonParse = async (response: Response) => {
 // ============== API FUNCTIONS ==============
 
 // Fetch kline data
-const fetchKline = async (symbol: string = 'BTCUSDT', interval: string = '60', limit: number = 72): Promise<any[]> => {
+const fetchKline = async (
+  symbol: string = 'BTCUSDT',
+  interval: string = '60',
+  limit: number = 72
+): Promise<any[]> => {
   try {
     const response = await fetch(
       `${BYBIT_BASE_URL}/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=${limit}`
     );
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0 && data?.result?.list) {
       return data.result.list;
     }
@@ -72,12 +76,14 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return (
     <div className="card-surface p-3 shadow-xl text-xs font-mono">
       <p className="text-muted-foreground mb-1 font-sans text-[10px]">{label}</p>
-      <p className={d.dd < -1 ? 'text-negative font-semibold' : d.dd < 0 ? 'text-warning' : 'text-positive'}>
+      <p
+        className={
+          d.dd < -1 ? 'text-negative font-semibold' : d.dd < 0 ? 'text-warning' : 'text-positive'
+        }
+      >
         Drawdown: {d.dd.toFixed(2)}%
       </p>
-      {d.dd < -3 && (
-        <p className="text-negative text-[10px] mt-1">⚠ Significant drawdown</p>
-      )}
+      {d.dd < -3 && <p className="text-negative text-[10px] mt-1">⚠ Significant drawdown</p>}
     </div>
   );
 };
@@ -102,11 +108,11 @@ export default function DrawdownChartInner() {
 
       // Fetch real kline data for BTCUSDT
       const klines = await fetchKline('BTCUSDT', '60', 72);
-      
+
       if (klines.length === 0) {
         throw new Error('No kline data available');
       }
-      
+
       // Calculate drawdown from real price data
       let peak = 0;
       let maxDrawdown = 0;
@@ -115,55 +121,55 @@ export default function DrawdownChartInner() {
       let troughPrice = 0;
       let peakTime = 0;
       let troughTime = 0;
-      
+
       const drawdownData: DrawdownPoint[] = klines.map((k: any) => {
         const close = parseFloat(k[4]);
         const timestamp = parseInt(k[0]);
-        const time = new Date(timestamp).toLocaleString('en-US', { 
-          month: 'short', 
+        const time = new Date(timestamp).toLocaleString('en-US', {
+          month: 'short',
           day: 'numeric',
           hour: '2-digit',
-          minute: '2-digit'
+          minute: '2-digit',
         });
-        
+
         // Track peak
         if (close > peak) {
           peak = close;
           peakPrice = close;
           peakTime = timestamp;
         }
-        
+
         // Calculate drawdown from peak
         const drawdown = peak > 0 ? ((close - peak) / peak) * 100 : 0;
-        
+
         // Track max drawdown
         if (drawdown < maxDrawdown) {
           maxDrawdown = drawdown;
           troughPrice = close;
           troughTime = timestamp;
         }
-        
+
         // Track current drawdown
         if (drawdown < currentDrawdown) {
           currentDrawdown = drawdown;
         }
-        
+
         return {
           time,
           dd: Math.round(drawdown * 100) / 100,
         };
       });
-      
+
       // Calculate recovery time (if recovered)
-      const recoveryTime = maxDrawdown < 0 && peakTime > 0 && troughTime > 0
-        ? Math.round((peakTime - troughTime) / 3600000)
-        : 0;
-      
+      const recoveryTime =
+        maxDrawdown < 0 && peakTime > 0 && troughTime > 0
+          ? Math.round((peakTime - troughTime) / 3600000)
+          : 0;
+
       // Calculate limit used based on max drawdown vs 15% limit
-      const limitUsed = maxDrawdown < 0 
-        ? Math.round((Math.abs(maxDrawdown) / 15) * 100 * 10) / 10
-        : 0;
-      
+      const limitUsed =
+        maxDrawdown < 0 ? Math.round((Math.abs(maxDrawdown) / 15) * 100 * 10) / 10 : 0;
+
       setData(drawdownData);
       setStats({
         maxDD: Math.round(Math.abs(maxDrawdown) * 100) / 100,
@@ -173,7 +179,7 @@ export default function DrawdownChartInner() {
         peakPrice: peakPrice,
         troughPrice: troughPrice,
       });
-      
+
       setError(null);
     } catch (error) {
       console.error('Failed to fetch drawdown data:', error);
@@ -231,9 +237,7 @@ export default function DrawdownChartInner() {
     <div className="card-surface p-5">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            Drawdown Tracking
-          </h3>
+          <h3 className="text-sm font-semibold text-foreground">Drawdown Tracking</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Peak-to-trough decline · Max drawdown limit: 15%
           </p>
@@ -245,13 +249,17 @@ export default function DrawdownChartInner() {
           </div>
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Current DD</p>
-            <p className={`font-bold font-tabular ${stats.currentDD < -1 ? 'text-negative' : stats.currentDD < 0 ? 'text-warning' : 'text-positive'}`}>
+            <p
+              className={`font-bold font-tabular ${stats.currentDD < -1 ? 'text-negative' : stats.currentDD < 0 ? 'text-warning' : 'text-positive'}`}
+            >
               {stats.currentDD.toFixed(1)}%
             </p>
           </div>
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground">Limit Used</p>
-            <p className={`font-bold font-tabular ${stats.limitUsed > 50 ? 'text-warning' : 'text-positive'}`}>
+            <p
+              className={`font-bold font-tabular ${stats.limitUsed > 50 ? 'text-warning' : 'text-positive'}`}
+            >
               {stats.limitUsed}%
             </p>
           </div>
@@ -259,21 +267,14 @@ export default function DrawdownChartInner() {
       </div>
 
       <ResponsiveContainer width="100%" height={160}>
-        <AreaChart
-          data={data}
-          margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-        >
+        <AreaChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="drawdownAreaGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="var(--negative)" stopOpacity={0.3} />
               <stop offset="95%" stopColor="var(--negative)" stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <CartesianGrid
-            strokeDasharray="3 3"
-            stroke="var(--border)"
-            vertical={false}
-          />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
           <XAxis
             dataKey="time"
             tick={{ fill: 'var(--muted-foreground)', fontSize: 9 }}
@@ -327,10 +328,14 @@ export default function DrawdownChartInner() {
             Peak: <span className="text-foreground font-mono">{formatUsd(stats.peakPrice)}</span>
           </span>
           <span>
-            Trough: <span className="text-foreground font-mono">{formatUsd(stats.troughPrice)}</span>
+            Trough:{' '}
+            <span className="text-foreground font-mono">{formatUsd(stats.troughPrice)}</span>
           </span>
           <span>
-            Recovery: <span className="text-foreground font-mono">{stats.recoveryTime > 0 ? `${stats.recoveryTime}h` : 'N/A'}</span>
+            Recovery:{' '}
+            <span className="text-foreground font-mono">
+              {stats.recoveryTime > 0 ? `${stats.recoveryTime}h` : 'N/A'}
+            </span>
           </span>
         </div>
         <p className="text-[10px] text-muted-foreground mt-1">

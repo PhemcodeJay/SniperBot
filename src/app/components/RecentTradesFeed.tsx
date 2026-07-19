@@ -3,7 +3,12 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import {
+  BYBIT_BASE_URL,
+  createBybitAuthHeaders,
+  getBybitCredentials,
+  safeJsonParse,
+} from '@/lib/bybit';
 import { realtimeManager } from '@/lib/realtimeManager';
 import { CheckCircle2, XCircle, Target, Clock, Loader2, RefreshCw } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
@@ -110,7 +115,9 @@ const fetchPositions = async (): Promise<any[]> => {
 // Fetch ticker data for price updates
 const fetchTicker = async (symbol: string): Promise<any> => {
   try {
-    const response = await fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`);
+    const response = await fetch(
+      `${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`
+    );
     const data = await safeJsonParse(response);
     if (data?.retCode === 0 && data?.result?.list?.[0]) {
       return data.result.list[0];
@@ -151,10 +158,7 @@ export default function RecentTradesFeed() {
       }
 
       // Fetch order history and positions in parallel
-      const [orders, positions] = await Promise.all([
-        fetchOrderHistory(),
-        fetchPositions(),
-      ]);
+      const [orders, positions] = await Promise.all([fetchOrderHistory(), fetchPositions()]);
 
       const allTrades: Trade[] = [];
 
@@ -233,7 +237,6 @@ export default function RecentTradesFeed() {
       allTrades.sort((a, b) => b.timestamp - a.timestamp);
       setTrades(allTrades.slice(0, 50));
       setIsApiConnected(true);
-
     } catch (err: any) {
       console.error('Error fetching trades:', err);
       setError(err.message || 'Failed to fetch trades');
@@ -256,23 +259,27 @@ export default function RecentTradesFeed() {
       try {
         if (ticker && ticker.symbol) {
           const price = parseFloat(ticker.lastPrice || '0');
-          setTrades(prev => prev.map(trade => {
-            if (trade.status === 'open' && trade.symbol === ticker.symbol) {
-              const pnl = trade.direction === 'long'
-                ? (price - trade.entryPrice) * trade.size
-                : (trade.entryPrice - price) * trade.size;
-              const pnlPct = trade.entryPrice > 0 ? (pnl / (trade.entryPrice * trade.size)) * 100 : 0;
+          setTrades((prev) =>
+            prev.map((trade) => {
+              if (trade.status === 'open' && trade.symbol === ticker.symbol) {
+                const pnl =
+                  trade.direction === 'long'
+                    ? (price - trade.entryPrice) * trade.size
+                    : (trade.entryPrice - price) * trade.size;
+                const pnlPct =
+                  trade.entryPrice > 0 ? (pnl / (trade.entryPrice * trade.size)) * 100 : 0;
 
-              return {
-                ...trade,
-                exitPrice: Math.round(price * 10000) / 10000,
-                pnl: Math.round(pnl * 100) / 100,
-                pnlPct: Math.round(pnlPct * 10) / 10,
-                holdMins: Math.floor((Date.now() - trade.timestamp) / 60000),
-              };
-            }
-            return trade;
-          }));
+                return {
+                  ...trade,
+                  exitPrice: Math.round(price * 10000) / 10000,
+                  pnl: Math.round(pnl * 100) / 100,
+                  pnlPct: Math.round(pnlPct * 10) / 10,
+                  holdMins: Math.floor((Date.now() - trade.timestamp) / 60000),
+                };
+              }
+              return trade;
+            })
+          );
         }
       } catch (e) {
         // ignore
@@ -306,9 +313,9 @@ export default function RecentTradesFeed() {
     );
   }
 
-  const wins = trades.filter(t => t.outcome === 'tp1_hit' || t.outcome === 'tp2_hit').length;
-  const openTrades = trades.filter(t => t.status === 'open').length;
-  const closedTrades = trades.filter(t => t.status === 'closed').length;
+  const wins = trades.filter((t) => t.outcome === 'tp1_hit' || t.outcome === 'tp2_hit').length;
+  const openTrades = trades.filter((t) => t.status === 'open').length;
+  const closedTrades = trades.filter((t) => t.status === 'closed').length;
   const totalPnl = trades.reduce((sum, t) => sum + t.pnl, 0);
 
   return (
@@ -317,7 +324,9 @@ export default function RecentTradesFeed() {
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-foreground">
             Recent Trades
-            <span className="ml-2 text-[10px] font-normal text-muted-foreground">Unified Account</span>
+            <span className="ml-2 text-[10px] font-normal text-muted-foreground">
+              Unified Account
+            </span>
           </h3>
           {isApiConnected && (
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
@@ -331,8 +340,12 @@ export default function RecentTradesFeed() {
           )}
         </div>
         <div className="flex items-center gap-3 text-xs">
-          <span className="text-muted-foreground">{wins}/{closedTrades} wins</span>
-          <span className={`font-semibold font-tabular ${totalPnl >= 0 ? 'text-positive' : 'text-negative'}`}>
+          <span className="text-muted-foreground">
+            {wins}/{closedTrades} wins
+          </span>
+          <span
+            className={`font-semibold font-tabular ${totalPnl >= 0 ? 'text-positive' : 'text-negative'}`}
+          >
             {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
           </span>
           <button
@@ -356,7 +369,9 @@ export default function RecentTradesFeed() {
         <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
           <p className="text-sm font-semibold text-foreground">No trades yet</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {isApiConnected ? 'Trades will appear here as they execute on Bybit' : 'Connect your Bybit API to view trades'}
+            {isApiConnected
+              ? 'Trades will appear here as they execute on Bybit'
+              : 'Connect your Bybit API to view trades'}
           </p>
         </div>
       ) : (
@@ -364,11 +379,16 @@ export default function RecentTradesFeed() {
           <table className="w-full text-xs" aria-label="Recent trades">
             <thead>
               <tr className="border-b border-border/50">
-                {['Time', 'Symbol', 'Dir.', 'Status', 'Outcome', 'P&L', 'Hold', 'Conf.'].map((h, i) => (
-                  <th key={`th-recent-${i}`} className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    {h}
-                  </th>
-                ))}
+                {['Time', 'Symbol', 'Dir.', 'Status', 'Outcome', 'P&L', 'Hold', 'Conf.'].map(
+                  (h, i) => (
+                    <th
+                      key={`th-recent-${i}`}
+                      className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                    >
+                      {h}
+                    </th>
+                  )
+                )}
               </tr>
             </thead>
             <tbody>
@@ -378,32 +398,61 @@ export default function RecentTradesFeed() {
                 const isOpen = trade.status === 'open';
 
                 return (
-                  <tr key={trade.id} className={`border-b border-border/30 hover:bg-muted/20 transition-colors duration-100 ${isOpen ? 'bg-yellow-50/30 dark:bg-yellow-950/10' : ''}`}>
-                    <td className="px-4 py-2.5 font-mono text-muted-foreground font-tabular">{trade.closedAt}</td>
-                    <td className="px-4 py-2.5 font-mono font-semibold text-foreground">{trade.symbol}</td>
-                    <td className="px-4 py-2.5"><StatusBadge variant={trade.direction} size="sm" /></td>
+                  <tr
+                    key={trade.id}
+                    className={`border-b border-border/30 hover:bg-muted/20 transition-colors duration-100 ${isOpen ? 'bg-yellow-50/30 dark:bg-yellow-950/10' : ''}`}
+                  >
+                    <td className="px-4 py-2.5 font-mono text-muted-foreground font-tabular">
+                      {trade.closedAt}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono font-semibold text-foreground">
+                      {trade.symbol}
+                    </td>
                     <td className="px-4 py-2.5">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium capitalize ${isOpen ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}>
+                      <StatusBadge variant={trade.direction} size="sm" />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-medium capitalize ${isOpen ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}`}
+                      >
                         {isOpen ? 'Open' : 'Closed'}
                       </span>
                     </td>
                     <td className="px-4 py-2.5">
                       <div className={`flex items-center gap-1.5 ${color}`}>
                         <Icon size={12} />
-                        <StatusBadge variant={isOpen ? 'pending' : trade.outcome === 'tp1_hit' || trade.outcome === 'tp2_hit' ? 'confirmed' : 'expired'} size="sm" />
+                        <StatusBadge
+                          variant={
+                            isOpen
+                              ? 'pending'
+                              : trade.outcome === 'tp1_hit' || trade.outcome === 'tp2_hit'
+                                ? 'confirmed'
+                                : 'expired'
+                          }
+                          size="sm"
+                        />
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`font-semibold font-tabular ${trade.pnl >= 0 ? 'text-positive' : 'text-negative'}`}>
+                      <span
+                        className={`font-semibold font-tabular ${trade.pnl >= 0 ? 'text-positive' : 'text-negative'}`}
+                      >
                         {trade.pnl >= 0 ? '+' : ''}${Math.abs(trade.pnl).toFixed(2)}
                       </span>
-                      <span className={`ml-1 text-[10px] font-tabular ${trade.pnlPct >= 0 ? 'text-positive/70' : 'text-negative/70'}`}>
-                        ({trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(2)}%)
+                      <span
+                        className={`ml-1 text-[10px] font-tabular ${trade.pnlPct >= 0 ? 'text-positive/70' : 'text-negative/70'}`}
+                      >
+                        ({trade.pnlPct >= 0 ? '+' : ''}
+                        {trade.pnlPct.toFixed(2)}%)
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-muted-foreground font-tabular">{trade.holdMins}m</td>
+                    <td className="px-4 py-2.5 font-mono text-muted-foreground font-tabular">
+                      {trade.holdMins}m
+                    </td>
                     <td className="px-4 py-2.5">
-                      <span className={`font-semibold font-tabular text-xs ${trade.confidence >= 85 ? 'text-positive' : trade.confidence >= 80 ? 'text-info' : 'text-warning'}`}>
+                      <span
+                        className={`font-semibold font-tabular text-xs ${trade.confidence >= 85 ? 'text-positive' : trade.confidence >= 80 ? 'text-info' : 'text-warning'}`}
+                      >
                         {Math.round(trade.confidence)}%
                       </span>
                     </td>

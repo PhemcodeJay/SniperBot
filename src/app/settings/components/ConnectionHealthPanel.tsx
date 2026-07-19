@@ -24,51 +24,76 @@ const BYBIT_BASE_URL = 'https://api.bybit.com';
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
 const INITIAL_ENDPOINTS: EndpointHealth[] = [
-  { 
-    id: 'rest_mainnet', 
-    label: 'REST API (Mainnet)', 
-    endpoint: 'api.bybit.com', 
-    mode: 'live', 
-    status: 'checking', 
-    latency: null, 
+  {
+    id: 'rest_mainnet',
+    label: 'REST API (Mainnet)',
+    endpoint: 'api.bybit.com',
+    mode: 'live',
+    status: 'checking',
+    latency: null,
     lastChecked: null,
-    url: `${BYBIT_BASE_URL}/v5/market/time`
+    url: `${BYBIT_BASE_URL}/v5/market/time`,
   },
-  { 
-    id: 'ws_mainnet', 
-    label: 'WebSocket (Mainnet)', 
-    endpoint: 'stream.bybit.com', 
-    mode: 'live', 
-    status: 'checking', 
-    latency: null, 
+  {
+    id: 'ws_mainnet',
+    label: 'WebSocket (Mainnet)',
+    endpoint: 'stream.bybit.com',
+    mode: 'live',
+    status: 'checking',
+    latency: null,
     lastChecked: null,
-    url: BYBIT_WS_URL
+    url: BYBIT_WS_URL,
   },
-  { 
-    id: 'time_sync', 
-    label: 'Server Time Sync', 
-    endpoint: 'api.bybit.com/v5/market/time', 
-    mode: 'both', 
-    status: 'checking', 
-    latency: null, 
-    lastChecked: null, 
+  {
+    id: 'time_sync',
+    label: 'Server Time Sync',
+    endpoint: 'api.bybit.com/v5/market/time',
+    mode: 'both',
+    status: 'checking',
+    latency: null,
+    lastChecked: null,
     note: 'Drift < 1000ms required',
-    url: `${BYBIT_BASE_URL}/v5/market/time`
+    url: `${BYBIT_BASE_URL}/v5/market/time`,
   },
 ];
 
-const STATUS_CONFIG: Record<HealthStatus, { icon: React.ElementType; color: string; bg: string; label: string }> = {
-  online: { icon: CheckCircle2, color: 'text-positive', bg: 'bg-positive-subtle border-positive/20', label: 'Online' },
-  degraded: { icon: AlertTriangle, color: 'text-warning', bg: 'bg-warning-subtle border-warning/20', label: 'Degraded' },
-  offline: { icon: XCircle, color: 'text-negative', bg: 'bg-negative-subtle border-negative/20', label: 'Offline' },
-  checking: { icon: RefreshCw, color: 'text-muted-foreground', bg: 'bg-muted border-border', label: 'Checking' },
+const STATUS_CONFIG: Record<
+  HealthStatus,
+  { icon: React.ElementType; color: string; bg: string; label: string }
+> = {
+  online: {
+    icon: CheckCircle2,
+    color: 'text-positive',
+    bg: 'bg-positive-subtle border-positive/20',
+    label: 'Online',
+  },
+  degraded: {
+    icon: AlertTriangle,
+    color: 'text-warning',
+    bg: 'bg-warning-subtle border-warning/20',
+    label: 'Degraded',
+  },
+  offline: {
+    icon: XCircle,
+    color: 'text-negative',
+    bg: 'bg-negative-subtle border-negative/20',
+    label: 'Offline',
+  },
+  checking: {
+    icon: RefreshCw,
+    color: 'text-muted-foreground',
+    bg: 'bg-muted border-border',
+    label: 'Checking',
+  },
 };
 
 import { realtimeManager } from '@/lib/realtimeManager';
 
-async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: HealthStatus; latency: number }> {
+async function checkEndpointHealth(
+  endpoint: EndpointHealth
+): Promise<{ status: HealthStatus; latency: number }> {
   const start = Date.now();
-  
+
   try {
     if (endpoint.url.startsWith('wss://')) {
       const connected = realtimeManager.isWsConnected();
@@ -80,15 +105,15 @@ async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: 
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(5000),
       });
-      
+
       const latency = Date.now() - start;
-      
+
       if (response.ok) {
         const data = await response.json();
         if (data.retCode === 0) {
-          return { 
-            status: latency < 300 ? 'online' : 'degraded', 
-            latency 
+          return {
+            status: latency < 300 ? 'online' : 'degraded',
+            latency,
           };
         }
         return { status: 'degraded', latency };
@@ -96,9 +121,10 @@ async function checkEndpointHealth(endpoint: EndpointHealth): Promise<{ status: 
       return { status: 'offline', latency };
     }
   } catch (error) {
-    return { 
-      status: error instanceof DOMException && error.name === 'TimeoutError' ? 'offline' : 'offline', 
-      latency: Date.now() - start 
+    return {
+      status:
+        error instanceof DOMException && error.name === 'TimeoutError' ? 'offline' : 'offline',
+      latency: Date.now() - start,
     };
   }
 }
@@ -132,10 +158,13 @@ export default function ConnectionHealthPanel() {
   }, [runHealthCheck]);
 
   const onlineCount = endpoints.filter((e) => e.status === 'online').length;
-  const overallStatus: HealthStatus =
-    endpoints.some((e) => e.status === 'offline') ? 'offline' :
-    endpoints.some((e) => e.status === 'degraded') ? 'degraded' :
-    endpoints.every((e) => e.status === 'online') ? 'online' : 'checking';
+  const overallStatus: HealthStatus = endpoints.some((e) => e.status === 'offline')
+    ? 'offline'
+    : endpoints.some((e) => e.status === 'degraded')
+      ? 'degraded'
+      : endpoints.every((e) => e.status === 'online')
+        ? 'online'
+        : 'checking';
 
   const overall = STATUS_CONFIG[overallStatus];
   const OverallIcon = overall.icon;
@@ -149,7 +178,9 @@ export default function ConnectionHealthPanel() {
         </div>
         <div>
           <h2 className="text-foreground font-semibold text-sm">Connection Health</h2>
-          <p className="text-muted-foreground text-xs mt-0.5">Real-time status of Bybit endpoints</p>
+          <p className="text-muted-foreground text-xs mt-0.5">
+            Real-time status of Bybit endpoints
+          </p>
         </div>
         <button
           onClick={runHealthCheck}
@@ -163,12 +194,19 @@ export default function ConnectionHealthPanel() {
 
       {/* Overall status banner */}
       <div className={`flex items-center gap-2.5 p-3 rounded-lg border mb-4 ${overall.bg}`}>
-        <OverallIcon size={15} className={`${overall.color} ${overallStatus === 'checking' ? 'animate-spin' : ''} shrink-0`} />
+        <OverallIcon
+          size={15}
+          className={`${overall.color} ${overallStatus === 'checking' ? 'animate-spin' : ''} shrink-0`}
+        />
         <div className="flex-1">
           <p className={`text-xs font-semibold ${overall.color}`}>
-            {overallStatus === 'checking' ? 'Running diagnostics...' :
-             overallStatus === 'online' ? `All systems operational — ${onlineCount}/${endpoints.length} endpoints healthy` :
-             overallStatus === 'degraded'? 'Some endpoints experiencing high latency' : 'One or more endpoints unreachable'}
+            {overallStatus === 'checking'
+              ? 'Running diagnostics...'
+              : overallStatus === 'online'
+                ? `All systems operational — ${onlineCount}/${endpoints.length} endpoints healthy`
+                : overallStatus === 'degraded'
+                  ? 'Some endpoints experiencing high latency'
+                  : 'One or more endpoints unreachable'}
           </p>
           {lastFullCheck && (
             <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
@@ -184,7 +222,10 @@ export default function ConnectionHealthPanel() {
           const cfg = STATUS_CONFIG[ep.status];
           const StatusIcon = cfg.icon;
           return (
-            <div key={ep.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-background border border-border">
+            <div
+              key={ep.id}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-background border border-border"
+            >
               <StatusIcon
                 size={14}
                 className={`${cfg.color} shrink-0 ${ep.status === 'checking' ? 'animate-spin' : ''}`}
@@ -192,23 +233,38 @@ export default function ConnectionHealthPanel() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-xs font-medium text-foreground">{ep.label}</p>
-                  <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                    ep.mode === 'paper' ? 'bg-primary/10 text-primary' :
-                    ep.mode === 'live'? 'bg-negative-subtle text-negative' : 'bg-muted text-muted-foreground'
-                  }`}>
+                  <span
+                    className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                      ep.mode === 'paper'
+                        ? 'bg-primary/10 text-primary'
+                        : ep.mode === 'live'
+                          ? 'bg-negative-subtle text-negative'
+                          : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
                     {ep.mode === 'both' ? 'SHARED' : ep.mode.toUpperCase()}
                   </span>
                 </div>
-                <p className="text-[10px] text-muted-foreground font-mono truncate">{ep.endpoint}</p>
-                {ep.note && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{ep.note}</p>}
+                <p className="text-[10px] text-muted-foreground font-mono truncate">
+                  {ep.endpoint}
+                </p>
+                {ep.note && (
+                  <p className="text-[10px] text-muted-foreground/70 mt-0.5">{ep.note}</p>
+                )}
               </div>
               <div className="text-right shrink-0">
                 {ep.status === 'checking' ? (
                   <span className="text-[11px] text-muted-foreground font-mono">—</span>
                 ) : ep.latency !== null && ep.latency > 0 ? (
-                  <span className={`text-[11px] font-mono font-semibold ${
-                    ep.latency < 150 ? 'text-positive' : ep.latency < 400 ? 'text-warning' : 'text-negative'
-                  }`}>
+                  <span
+                    className={`text-[11px] font-mono font-semibold ${
+                      ep.latency < 150
+                        ? 'text-positive'
+                        : ep.latency < 400
+                          ? 'text-warning'
+                          : 'text-negative'
+                    }`}
+                  >
                     {ep.latency}ms
                   </span>
                 ) : (

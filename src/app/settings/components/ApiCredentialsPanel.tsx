@@ -4,7 +4,15 @@
 
 import React, { useState } from 'react';
 import { BYBIT_BASE_URL, createBybitAuthHeaders, safeJsonParse } from '@/lib/bybit';
-import { Eye, EyeOff, CheckCircle2, XCircle, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
+} from 'lucide-react';
 
 type TradingMode = 'paper' | 'live';
 
@@ -17,8 +25,8 @@ interface TestResult {
   status: 'idle' | 'testing' | 'success' | 'error';
   message: string;
   latency?: number;
-  accountInfo?: { 
-    balance: string; 
+  accountInfo?: {
+    balance: string;
     uid: string;
     accountType?: string;
     availableBalance?: string;
@@ -33,7 +41,10 @@ interface TestResult {
 // ============== API FUNCTIONS ==============
 
 // Fetch wallet balance
-const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ totalEquity: string; availableBalance: string; uid: string }> => {
+const fetchWalletBalance = async (
+  apiKey: string,
+  apiSecret: string
+): Promise<{ totalEquity: string; availableBalance: string; uid: string }> => {
   try {
     const recvWindow = '5000';
     const params = 'accountType=UNIFIED';
@@ -48,8 +59,14 @@ const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ 
 
     if (data?.retCode === 0) {
       const wallet = data?.result?.list?.[0] || data?.result || {};
-      const totalEquity = wallet?.totalEquity ?? wallet?.equity ?? wallet?.walletBalance ?? wallet?.balance ?? '0';
-      const availableBalance = wallet?.availableBalance ?? wallet?.available ?? wallet?.walletBalance ?? wallet?.balance ?? '0';
+      const totalEquity =
+        wallet?.totalEquity ?? wallet?.equity ?? wallet?.walletBalance ?? wallet?.balance ?? '0';
+      const availableBalance =
+        wallet?.availableBalance ??
+        wallet?.available ??
+        wallet?.walletBalance ??
+        wallet?.balance ??
+        '0';
       const uid = data?.result?.uid || data?.result?.accountUid || wallet?.uid || 'N/A';
 
       return {
@@ -69,7 +86,10 @@ const fetchWalletBalance = async (apiKey: string, apiSecret: string): Promise<{ 
 };
 
 // Fetch account info
-const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ accountType: string; uid: string }> => {
+const fetchAccountInfo = async (
+  apiKey: string,
+  apiSecret: string
+): Promise<{ accountType: string; uid: string }> => {
   try {
     const recvWindow = '5000';
     const params = 'accountType=UNIFIED';
@@ -81,14 +101,14 @@ const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ ac
     });
 
     const data = await safeJsonParse(response);
-    
+
     if (data?.retCode === 0 && data?.result) {
       return {
         accountType: data.result.accountType || data.result.accType || 'Unified',
         uid: data.result.uid || data.result.accountUid || 'N/A',
       };
     }
-    
+
     const errorMsg = data?.retMsg || 'Unknown error';
     const errorCode = data?.retCode || 'Unknown';
     throw new Error(`Error ${errorCode}: ${errorMsg}`);
@@ -102,10 +122,16 @@ const fetchAccountInfo = async (apiKey: string, apiSecret: string): Promise<{ ac
 
 export default function ApiCredentialsPanel() {
   const [activeMode, setActiveMode] = useState<TradingMode>('live');
-  const [showSecret, setShowSecret] = useState<Record<TradingMode, boolean>>({ paper: false, live: false });
+  const [showSecret, setShowSecret] = useState<Record<TradingMode, boolean>>({
+    paper: false,
+    live: false,
+  });
   const [credentials, setCredentials] = useState<Record<TradingMode, Credentials>>({
     paper: { apiKey: '', apiSecret: '' },
-    live: { apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '', apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '' },
+    live: {
+      apiKey: process.env.NEXT_PUBLIC_BYBIT_API_KEY || '',
+      apiSecret: process.env.NEXT_PUBLIC_BYBIT_API_SECRET || '',
+    },
   });
   const [testResult, setTestResult] = useState<Record<TradingMode, TestResult>>({
     paper: { status: 'idle', message: '' },
@@ -120,39 +146,55 @@ export default function ApiCredentialsPanel() {
   const handleTest = async (mode: TradingMode) => {
     const creds = credentials[mode];
     if (!creds.apiKey || !creds.apiSecret) {
-      setTestResult((prev) => ({ ...prev, [mode]: { status: 'error', message: 'API Key and Secret are required.' } }));
+      setTestResult((prev) => ({
+        ...prev,
+        [mode]: { status: 'error', message: 'API Key and Secret are required.' },
+      }));
       return;
     }
 
     // Validate API key format
     if (creds.apiKey.length < 20) {
-      setTestResult((prev) => ({ 
-        ...prev, 
-        [mode]: { 
-          status: 'error', 
-          message: '⚠️ API key appears to be invalid. Bybit API keys are typically 32+ characters. Please check your API credentials.' 
-        } 
+      setTestResult((prev) => ({
+        ...prev,
+        [mode]: {
+          status: 'error',
+          message:
+            '⚠️ API key appears to be invalid. Bybit API keys are typically 32+ characters. Please check your API credentials.',
+        },
       }));
       return;
     }
 
-    setTestResult((prev) => ({ ...prev, [mode]: { status: 'testing', message: 'Connecting to Bybit Mainnet...' } }));
+    setTestResult((prev) => ({
+      ...prev,
+      [mode]: { status: 'testing', message: 'Connecting to Bybit Mainnet...' },
+    }));
     const start = Date.now();
 
     try {
       // Fetch wallet balance first (most reliable endpoint)
       const balanceData = await fetchWalletBalance(creds.apiKey, creds.apiSecret);
-      
+
       // Then fetch account info
       const accountData = await fetchAccountInfo(creds.apiKey, creds.apiSecret);
-      
+
       const latency = Date.now() - start;
-      
+
       const balanceNum = parseFloat(balanceData.totalEquity);
       const availableNum = parseFloat(balanceData.availableBalance);
-      const balanceDisplay = Number.isFinite(balanceNum) && balanceNum > 0 ? `${balanceNum.toFixed(2)} USDT` : '0.00 USDT';
-      const availableDisplay = Number.isFinite(availableNum) && availableNum > 0 ? `${availableNum.toFixed(2)} USDT` : '0.00 USDT';
-      const totalDisplay = Number.isFinite(balanceNum) && balanceNum > 0 ? `${balanceNum.toFixed(2)} USDT` : '0.00 USDT';
+      const balanceDisplay =
+        Number.isFinite(balanceNum) && balanceNum > 0
+          ? `${balanceNum.toFixed(2)} USDT`
+          : '0.00 USDT';
+      const availableDisplay =
+        Number.isFinite(availableNum) && availableNum > 0
+          ? `${availableNum.toFixed(2)} USDT`
+          : '0.00 USDT';
+      const totalDisplay =
+        Number.isFinite(balanceNum) && balanceNum > 0
+          ? `${balanceNum.toFixed(2)} USDT`
+          : '0.00 USDT';
 
       setTestResult((prev) => ({
         ...prev,
@@ -172,9 +214,10 @@ export default function ApiCredentialsPanel() {
     } catch (error: any) {
       console.error('Connection test error:', error);
       const latency = Date.now() - start;
-      
-      let userMessage = error.message || '❌ Failed to connect. Check your credentials and network.';
-      
+
+      let userMessage =
+        error.message || '❌ Failed to connect. Check your credentials and network.';
+
       // Parse common Bybit errors
       if (userMessage.includes('10005')) {
         userMessage = '❌ Invalid API key. Please check your API key.';
@@ -183,7 +226,8 @@ export default function ApiCredentialsPanel() {
       } else if (userMessage.includes('10003')) {
         userMessage = '❌ Rate limit exceeded. Please try again later.';
       } else if (userMessage.includes('10010')) {
-        userMessage = '❌ API key permissions insufficient. Please ensure your API key has read permissions.';
+        userMessage =
+          '❌ API key permissions insufficient. Please ensure your API key has read permissions.';
       } else if (userMessage.includes('fetch') || userMessage.includes('network')) {
         userMessage = '❌ Network error. Please check your internet connection.';
       } else if (userMessage.includes('timeout')) {
@@ -216,7 +260,9 @@ export default function ApiCredentialsPanel() {
         </div>
         <div>
           <h2 className="text-foreground font-semibold text-sm">Bybit API Credentials</h2>
-          <p className="text-muted-foreground text-xs mt-0.5">Configure keys for Unified Trading Account</p>
+          <p className="text-muted-foreground text-xs mt-0.5">
+            Configure keys for Unified Trading Account
+          </p>
         </div>
       </div>
 
@@ -228,7 +274,9 @@ export default function ApiCredentialsPanel() {
             onClick={() => setActiveMode(mode)}
             className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all duration-150 capitalize ${
               activeMode === mode
-                ? mode === 'live' ? 'bg-negative text-white shadow-sm' : 'bg-primary text-white shadow-sm'
+                ? mode === 'live'
+                  ? 'bg-negative text-white shadow-sm'
+                  : 'bg-primary text-white shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
@@ -242,14 +290,17 @@ export default function ApiCredentialsPanel() {
         <div className="flex items-start gap-2.5 mb-4 p-3 rounded-lg bg-negative-subtle border border-negative/20">
           <ShieldAlert size={15} className="text-negative shrink-0 mt-0.5" />
           <p className="text-negative text-xs leading-relaxed">
-            Live trading uses real funds. Ensure your API key has <strong>Trade</strong> permission only — never enable withdrawals.
+            Live trading uses real funds. Ensure your API key has <strong>Trade</strong> permission
+            only — never enable withdrawals.
           </p>
         </div>
       )}
 
       {/* Credential Status */}
       <div className="mb-4 p-2 rounded-lg bg-muted/30 border border-border text-xs flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${hasValidKey ? 'bg-green-500' : 'bg-yellow-500'}`} />
+        <span
+          className={`w-2 h-2 rounded-full ${hasValidKey ? 'bg-green-500' : 'bg-yellow-500'}`}
+        />
         <span className="text-muted-foreground">
           {hasValidKey ? 'API key loaded from environment' : 'No API key configured'}
         </span>
@@ -293,7 +344,9 @@ export default function ApiCredentialsPanel() {
             />
             <button
               type="button"
-              onClick={() => setShowSecret((prev) => ({ ...prev, [activeMode]: !prev[activeMode] }))}
+              onClick={() =>
+                setShowSecret((prev) => ({ ...prev, [activeMode]: !prev[activeMode] }))
+              }
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
             >
               {showSecret[activeMode] ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -307,11 +360,15 @@ export default function ApiCredentialsPanel() {
         onClick={() => handleTest(activeMode)}
         disabled={result.status === 'testing'}
         className={`mt-5 w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 ${
-          result.status === 'testing' ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'bg-primary hover:bg-primary/90 text-white'
+          result.status === 'testing'
+            ? 'bg-muted text-muted-foreground cursor-not-allowed'
+            : 'bg-primary hover:bg-primary/90 text-white'
         }`}
       >
         {result.status === 'testing' ? (
-          <><Loader2 size={15} className="animate-spin" /> Connecting to Bybit Mainnet...</>
+          <>
+            <Loader2 size={15} className="animate-spin" /> Connecting to Bybit Mainnet...
+          </>
         ) : (
           'Test Connection'
         )}
@@ -319,38 +376,54 @@ export default function ApiCredentialsPanel() {
 
       {/* Result */}
       {result.status !== 'idle' && result.status !== 'testing' && (
-        <div className={`mt-4 p-3 rounded-lg border flex items-start gap-2.5 ${
-          result.status === 'success' ? 'bg-positive-subtle border-positive/20' : 'bg-negative-subtle border-negative/20'
-        }`}>
+        <div
+          className={`mt-4 p-3 rounded-lg border flex items-start gap-2.5 ${
+            result.status === 'success'
+              ? 'bg-positive-subtle border-positive/20'
+              : 'bg-negative-subtle border-negative/20'
+          }`}
+        >
           {result.status === 'success' ? (
             <CheckCircle2 size={15} className="text-positive shrink-0 mt-0.5" />
           ) : (
             <XCircle size={15} className="text-negative shrink-0 mt-0.5" />
           )}
           <div className="flex-1 min-w-0">
-            <p className={`text-xs font-medium ${result.status === 'success' ? 'text-positive' : 'text-negative'}`}>
+            <p
+              className={`text-xs font-medium ${result.status === 'success' ? 'text-positive' : 'text-negative'}`}
+            >
               {result.message}
             </p>
             {result.latency && (
-              <p className="text-muted-foreground text-[11px] mt-0.5">Latency: {result.latency}ms</p>
+              <p className="text-muted-foreground text-[11px] mt-0.5">
+                Latency: {result.latency}ms
+              </p>
             )}
             {result.accountInfo && (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div className="bg-background/60 rounded-md px-2 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Total Equity</p>
-                  <p className="text-xs font-mono font-semibold text-foreground">{result.accountInfo.totalEquity || result.accountInfo.balance}</p>
+                  <p className="text-xs font-mono font-semibold text-foreground">
+                    {result.accountInfo.totalEquity || result.accountInfo.balance}
+                  </p>
                 </div>
                 <div className="bg-background/60 rounded-md px-2 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Available Balance</p>
-                  <p className="text-xs font-mono font-semibold text-foreground">{result.accountInfo.availableBalance || '0.00 USDT'}</p>
+                  <p className="text-xs font-mono font-semibold text-foreground">
+                    {result.accountInfo.availableBalance || '0.00 USDT'}
+                  </p>
                 </div>
                 <div className="bg-background/60 rounded-md px-2 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Account Type</p>
-                  <p className="text-xs font-mono font-semibold text-foreground">{result.accountInfo.accountType || 'Unified'}</p>
+                  <p className="text-xs font-mono font-semibold text-foreground">
+                    {result.accountInfo.accountType || 'Unified'}
+                  </p>
                 </div>
                 <div className="bg-background/60 rounded-md px-2 py-1.5">
                   <p className="text-[10px] text-muted-foreground">Account UID</p>
-                  <p className="text-xs font-mono font-semibold text-foreground">{result.accountInfo.uid}</p>
+                  <p className="text-xs font-mono font-semibold text-foreground">
+                    {result.accountInfo.uid}
+                  </p>
                 </div>
               </div>
             )}

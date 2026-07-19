@@ -5,14 +5,40 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AppLayout from '@/components/AppLayout';
 import { realtimeManager } from '@/lib/realtimeManager';
-import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, placeBybitOrder, safeJsonParse } from '@/lib/bybit';
-import { calculateLivePnl, setSharedTrades, subscribeToSharedTradingState } from '@/lib/tradingState';
+import {
+  BYBIT_BASE_URL,
+  createBybitAuthHeaders,
+  getBybitCredentials,
+  placeBybitOrder,
+  safeJsonParse,
+} from '@/lib/bybit';
+import {
+  calculateLivePnl,
+  setSharedTrades,
+  subscribeToSharedTradingState,
+} from '@/lib/tradingState';
 import { writeLiveTrades, readLiveTrades } from '@/lib/liveTrades';
-import { 
-  Activity, Search, Download, ChevronUp, ChevronDown,
-  Wifi, WifiOff, RefreshCw, AlertCircle, X, Filter,
-  TrendingUp, TrendingDown, Clock, Calendar, Loader2,
-  Play, StopCircle, Plus, Minus
+import {
+  Activity,
+  Search,
+  Download,
+  ChevronUp,
+  ChevronDown,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  AlertCircle,
+  X,
+  Filter,
+  TrendingUp,
+  TrendingDown,
+  Clock,
+  Calendar,
+  Loader2,
+  Play,
+  StopCircle,
+  Plus,
+  Minus,
 } from 'lucide-react';
 
 interface Trade {
@@ -59,7 +85,18 @@ type SortKey = keyof Trade;
 // ============== BYBIT API CONFIG ==============
 const BYBIT_WS_URL = 'wss://stream.bybit.com/v5/public/linear';
 
-const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT'];
+const SUPPORTED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'DOGEUSDT',
+  'ADAUSDT',
+  'AVAXUSDT',
+  'LINKUSDT',
+  'DOTUSDT',
+];
 
 // ============== API HELPERS ==============
 const getApiCredentials = () => getBybitCredentials();
@@ -81,10 +118,16 @@ const formatPrice = (price: number | null | undefined): string => {
 };
 
 const calculateTradePnl = (trade: any, currentPrice: number | null) => {
-  const entryPrice = Number.isFinite(parseFloat(trade.entryPrice || '0')) ? parseFloat(trade.entryPrice || '0') : 0;
+  const entryPrice = Number.isFinite(parseFloat(trade.entryPrice || '0'))
+    ? parseFloat(trade.entryPrice || '0')
+    : 0;
   const size = Number.isFinite(parseFloat(trade.size || '0')) ? parseFloat(trade.size || '0') : 0;
-  const existingPnl = Number.isFinite(parseFloat(trade.pnl || '0')) ? parseFloat(trade.pnl || '0') : 0;
-  const existingPnlPct = Number.isFinite(parseFloat(trade.pnlPct || '0')) ? parseFloat(trade.pnlPct || '0') : 0;
+  const existingPnl = Number.isFinite(parseFloat(trade.pnl || '0'))
+    ? parseFloat(trade.pnl || '0')
+    : 0;
+  const existingPnlPct = Number.isFinite(parseFloat(trade.pnlPct || '0'))
+    ? parseFloat(trade.pnlPct || '0')
+    : 0;
 
   if (!currentPrice || !entryPrice || !size) {
     return { pnl: existingPnl, pnlPct: existingPnlPct };
@@ -160,17 +203,25 @@ const fetchOrderHistory = async (): Promise<Trade[]> => {
           const size = parseFloat(order.qty || '0');
           const pnl = parseFloat(order.pnl || 0);
           const pnlPct = entryPrice > 0 && size > 0 ? (pnl / (entryPrice * size)) * 100 : 0;
-          const createdTime = parseInt(order.createdTime || order.createdTimeMs || '0', 10) || Date.now();
-          const updatedTime = parseInt(order.updatedTime || order.updatedTimeMs || order.createdTime || '0', 10) || createdTime;
-          const duration = updatedTime > createdTime ? 
-            `${Math.floor((updatedTime - createdTime) / 60000)}m` : '0m';
+          const createdTime =
+            parseInt(order.createdTime || order.createdTimeMs || '0', 10) || Date.now();
+          const updatedTime =
+            parseInt(order.updatedTime || order.updatedTimeMs || order.createdTime || '0', 10) ||
+            createdTime;
+          const duration =
+            updatedTime > createdTime
+              ? `${Math.floor((updatedTime - createdTime) / 60000)}m`
+              : '0m';
 
           trades.push({
             id: `trade-${order.orderId || Date.now()}`,
             symbol: order.symbol,
             side,
             entryPrice: Math.round(entryPrice * 10000) / 10000,
-            exitPrice: Math.round((parseFloat(order.avgPrice || order.price || order.lastPrice || '0')) * 10000) / 10000,
+            exitPrice:
+              Math.round(
+                parseFloat(order.avgPrice || order.price || order.lastPrice || '0') * 10000
+              ) / 10000,
             size: Math.abs(size),
             pnl: Math.round(pnl * 100) / 100,
             pnlPct: Math.round(pnlPct * 10) / 10,
@@ -204,26 +255,29 @@ const fetchOrderHistory = async (): Promise<Trade[]> => {
 // Fetch ticker data for price updates
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch('/api/bybit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: `/v5/market/tickers?category=linear&symbol=${symbol}`, method: 'GET' }),
+        body: JSON.stringify({
+          endpoint: `/v5/market/tickers?category=linear&symbol=${symbol}`,
+          method: 'GET',
+        }),
       })
         .then((r) => r.json())
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -236,7 +290,10 @@ const getCurrentPrice = async (symbol: string): Promise<number | null> => {
     const response = await fetch('/api/bybit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: `/v5/market/tickers?category=linear&symbol=${symbol}`, method: 'GET' }),
+      body: JSON.stringify({
+        endpoint: `/v5/market/tickers?category=linear&symbol=${symbol}`,
+        method: 'GET',
+      }),
     });
     const data = await response.json();
     return parseFloat(data?.result?.list?.[0]?.lastPrice || '0');
@@ -247,9 +304,9 @@ const getCurrentPrice = async (symbol: string): Promise<number | null> => {
 
 // Execute trade
 const executeTradeOnBybit = async (
-  symbol: string, 
-  side: 'LONG' | 'SHORT', 
-  size: number, 
+  symbol: string,
+  side: 'LONG' | 'SHORT',
+  size: number,
   leverage: number
 ): Promise<{ success: boolean; orderId?: string; error?: string }> => {
   try {
@@ -258,7 +315,14 @@ const executeTradeOnBybit = async (
       return { success: false, error: 'API credentials not configured' };
     }
 
-    const orderResult = await placeBybitOrder({ symbol, side, qty: size, leverage, apiKey, apiSecret });
+    const orderResult = await placeBybitOrder({
+      symbol,
+      side,
+      qty: size,
+      leverage,
+      apiKey,
+      apiSecret,
+    });
     return orderResult;
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to execute trade' };
@@ -266,7 +330,12 @@ const executeTradeOnBybit = async (
 };
 
 // Close position
-const closePositionOnBybit = async (symbol: string, positionIdx: number, size: number, side: 'LONG' | 'SHORT'): Promise<{ success: boolean; error?: string }> => {
+const closePositionOnBybit = async (
+  symbol: string,
+  positionIdx: number,
+  size: number,
+  side: 'LONG' | 'SHORT'
+): Promise<{ success: boolean; error?: string }> => {
   try {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) {
@@ -304,7 +373,9 @@ export default function TradeLogsPage() {
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'open' | 'closed'>('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('entryTimestamp');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'disconnected' | 'connecting' | 'connected' | 'error'
+  >('connecting');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -312,7 +383,10 @@ export default function TradeLogsPage() {
       const merged = [...state.trades.paper, ...state.trades.live];
       setTrades(merged as any);
     });
-    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      unsubscribe();
+    };
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -342,15 +416,17 @@ export default function TradeLogsPage() {
       const hasKeys = hasValidCredentials();
       const paperTrades = readPaperTrades();
       const localLiveTrades = readLiveTrades();
-      const allSymbols = Array.from(new Set(
-        [...paperTrades, ...localLiveTrades]
-          .map((trade: any) => trade.symbol)
-          .filter(Boolean)
-      ));
+      const allSymbols = Array.from(
+        new Set(
+          [...paperTrades, ...localLiveTrades].map((trade: any) => trade.symbol).filter(Boolean)
+        )
+      );
       const tickerData = await fetchTickers(allSymbols);
 
       const paperEntries = paperTrades.map((trade: any) => {
-        const currentPrice = trade.symbol ? parseFloat(tickerData[trade.symbol]?.lastPrice || '0') : null;
+        const currentPrice = trade.symbol
+          ? parseFloat(tickerData[trade.symbol]?.lastPrice || '0')
+          : null;
         const { pnl, pnlPct } = calculateTradePnl(trade, currentPrice);
 
         return {
@@ -368,7 +444,9 @@ export default function TradeLogsPage() {
       });
 
       const liveEntries = localLiveTrades.map((trade: any) => {
-        const currentPrice = trade.symbol ? parseFloat(tickerData[trade.symbol]?.lastPrice || '0') : null;
+        const currentPrice = trade.symbol
+          ? parseFloat(tickerData[trade.symbol]?.lastPrice || '0')
+          : null;
         const { pnl, pnlPct } = calculateTradePnl(trade, currentPrice);
 
         return {
@@ -398,13 +476,12 @@ export default function TradeLogsPage() {
       }
 
       // Fetch positions and trades
-      const [positionData, tradeData] = await Promise.all([
-        fetchPositions(),
-        fetchOrderHistory(),
-      ]);
+      const [positionData, tradeData] = await Promise.all([fetchPositions(), fetchOrderHistory()]);
 
       const livePositions = positionData.map((pos) => {
-        const currentPrice = parseFloat(tickerData[pos.symbol]?.lastPrice || pos.markPrice || pos.entryPrice || '0');
+        const currentPrice = parseFloat(
+          tickerData[pos.symbol]?.lastPrice || pos.markPrice || pos.entryPrice || '0'
+        );
         const { pnl, pnlPct } = calculateLivePnl(pos.entryPrice, currentPrice, pos.size, pos.side);
         return {
           ...pos,
@@ -421,7 +498,6 @@ export default function TradeLogsPage() {
       setSharedTrades('live', liveEntries as any);
       setIsApiConnected(true);
       setLastUpdate(new Date());
-
     } catch (err: any) {
       console.error('Error fetching trade data:', err);
       setError(err.message || 'Failed to fetch trade data');
@@ -439,7 +515,9 @@ export default function TradeLogsPage() {
       fetchTradeData();
     });
     setConnectionStatus('connected');
-    return () => { unsubscribe(); };
+    return () => {
+      unsubscribe();
+    };
   }, [fetchTradeData]);
 
   const disconnectWebSocket = useCallback(() => {
@@ -453,7 +531,7 @@ export default function TradeLogsPage() {
       setError(null);
 
       const result = await executeTradeOnBybit(selectedSymbol, tradeSide, tradeSize, tradeLeverage);
-      
+
       if (result.success) {
         await fetchTradeData();
         setError(`✅ Trade executed: ${tradeSide} ${selectedSymbol} @ Market`);
@@ -470,10 +548,15 @@ export default function TradeLogsPage() {
   };
 
   // Close position
-  const closePosition = async (symbol: string, positionIdx: number, size: number, side: 'LONG' | 'SHORT') => {
+  const closePosition = async (
+    symbol: string,
+    positionIdx: number,
+    size: number,
+    side: 'LONG' | 'SHORT'
+  ) => {
     try {
       const result = await closePositionOnBybit(symbol, positionIdx, size, side);
-      
+
       if (result.success) {
         await fetchTradeData();
         setError(`✅ Position closed: ${symbol}`);
@@ -516,9 +599,25 @@ export default function TradeLogsPage() {
   const handleExport = () => {
     try {
       setExporting(true);
-      
-      const headers = ['ID', 'Symbol', 'Side', 'Entry Price', 'Exit Price', 'Size', 'P&L', 'P&L %', 'Confidence', 'Regime', 'Entry Time', 'Exit Time', 'Duration', 'Exit Reason', 'Slippage'];
-      const rows = filtered.map(t => [
+
+      const headers = [
+        'ID',
+        'Symbol',
+        'Side',
+        'Entry Price',
+        'Exit Price',
+        'Size',
+        'P&L',
+        'P&L %',
+        'Confidence',
+        'Regime',
+        'Entry Time',
+        'Exit Time',
+        'Duration',
+        'Exit Reason',
+        'Slippage',
+      ];
+      const rows = filtered.map((t) => [
         t.id,
         t.symbol,
         t.side,
@@ -535,9 +634,9 @@ export default function TradeLogsPage() {
         t.exitReason,
         t.slippage.toFixed(2),
       ]);
-      
-      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-      
+
+      const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -557,7 +656,10 @@ export default function TradeLogsPage() {
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortKey(key); setSortDir('desc'); }
+    else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
   };
 
   const filtered = trades
@@ -586,17 +688,25 @@ export default function TradeLogsPage() {
 
   const SortIcon = ({ col }: { col: SortKey }) =>
     sortKey === col ? (
-      sortDir === 'asc' ? <ChevronUp size={12} className="text-blue-600" /> : <ChevronDown size={12} className="text-blue-600" />
+      sortDir === 'asc' ? (
+        <ChevronUp size={12} className="text-blue-600" />
+      ) : (
+        <ChevronDown size={12} className="text-blue-600" />
+      )
     ) : (
       <ChevronDown size={12} className="text-gray-400" />
     );
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
-      case 'connected': return <Wifi size={14} className="text-green-500" />;
-      case 'connecting': return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
-      case 'error': return <WifiOff size={14} className="text-red-500" />;
-      default: return <WifiOff size={14} className="text-gray-500" />;
+      case 'connected':
+        return <Wifi size={14} className="text-green-500" />;
+      case 'connecting':
+        return <Loader2 size={14} className="text-yellow-500 animate-spin" />;
+      case 'error':
+        return <WifiOff size={14} className="text-red-500" />;
+      default:
+        return <WifiOff size={14} className="text-gray-500" />;
     }
   };
 
@@ -607,7 +717,7 @@ export default function TradeLogsPage() {
           <div className="animate-pulse space-y-4">
             <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded" />
             <div className="grid grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(i => (
+              {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="h-20 bg-gray-200 dark:bg-gray-700 rounded" />
               ))}
             </div>
@@ -643,18 +753,28 @@ export default function TradeLogsPage() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg text-xs">
               {getConnectionIcon()}
-              <span className={`font-medium ${
-                connectionStatus === 'connected' ? 'text-green-600 dark:text-green-400' :
-                connectionStatus === 'error' ? 'text-red-600 dark:text-red-400' :
-                'text-gray-500 dark:text-gray-400'
-              }`}>
-                {connectionStatus === 'connected' ? 'Live' : 
-                 connectionStatus === 'connecting' ? 'Connecting...' :
-                 connectionStatus === 'error' ? 'Error' : 'Disconnected'}
+              <span
+                className={`font-medium ${
+                  connectionStatus === 'connected'
+                    ? 'text-green-600 dark:text-green-400'
+                    : connectionStatus === 'error'
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-gray-500 dark:text-gray-400'
+                }`}
+              >
+                {connectionStatus === 'connected'
+                  ? 'Live'
+                  : connectionStatus === 'connecting'
+                    ? 'Connecting...'
+                    : connectionStatus === 'error'
+                      ? 'Error'
+                      : 'Disconnected'}
               </span>
               {connectionStatus === 'error' && (
                 <button
-                  onClick={() => { realtimeManager.triggerRefresh(); }}
+                  onClick={() => {
+                    realtimeManager.triggerRefresh();
+                  }}
                   className="ml-1 text-blue-600 dark:text-blue-400 hover:underline"
                 >
                   Reconnect
@@ -681,13 +801,15 @@ export default function TradeLogsPage() {
 
         {/* Error Message */}
         {error && (
-          <div className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${
-            error.startsWith('✅') 
-              ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-400'
-              : error.startsWith('❌')
-              ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
-              : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'
-          }`}>
+          <div
+            className={`flex items-center gap-2 p-3 rounded-lg border text-sm ${
+              error.startsWith('✅')
+                ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-400'
+                : error.startsWith('❌')
+                  ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400'
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-600 dark:text-red-400'
+            }`}
+          >
             <AlertCircle size={16} />
             <span>{error}</span>
             <button onClick={() => setError(null)} className="ml-auto hover:opacity-70">
@@ -701,20 +823,26 @@ export default function TradeLogsPage() {
           <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Symbol:</label>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Symbol:
+                </label>
                 <select
                   value={selectedSymbol}
                   onChange={(e) => setSelectedSymbol(e.target.value)}
                   className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
                 >
-                  {SUPPORTED_SYMBOLS.map(s => (
-                    <option key={s} value={s}>{s}</option>
+                  {SUPPORTED_SYMBOLS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
                   ))}
                 </select>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Side:</label>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Side:
+                </label>
                 <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
                   {(['LONG', 'SHORT'] as const).map((s) => (
                     <button
@@ -722,7 +850,9 @@ export default function TradeLogsPage() {
                       onClick={() => setTradeSide(s)}
                       className={`px-3 py-1 text-xs font-semibold transition-colors ${
                         tradeSide === s
-                          ? s === 'LONG' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+                          ? s === 'LONG'
+                            ? 'bg-green-600 text-white'
+                            : 'bg-red-600 text-white'
                           : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                       }`}
                     >
@@ -731,9 +861,11 @@ export default function TradeLogsPage() {
                   ))}
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Size:</label>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Size:
+                </label>
                 <input
                   type="number"
                   step={0.001}
@@ -743,20 +875,24 @@ export default function TradeLogsPage() {
                   className="w-20 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
                 />
               </div>
-              
+
               <div className="flex items-center gap-2">
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Leverage:</label>
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                  Leverage:
+                </label>
                 <select
                   value={tradeLeverage}
                   onChange={(e) => setTradeLeverage(parseInt(e.target.value))}
                   className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
                 >
-                  {[1, 2, 3, 5, 8, 10, 15, 20, 25, 30].map(v => (
-                    <option key={v} value={v}>{v}x</option>
+                  {[1, 2, 3, 5, 8, 10, 15, 20, 25, 30].map((v) => (
+                    <option key={v} value={v}>
+                      {v}x
+                    </option>
                   ))}
                 </select>
               </div>
-              
+
               <button
                 onClick={executeTrade}
                 disabled={isExecuting}
@@ -766,11 +902,7 @@ export default function TradeLogsPage() {
                     : 'bg-red-600 hover:bg-red-700 text-white'
                 } disabled:opacity-50`}
               >
-                {isExecuting ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Play size={14} />
-                )}
+                {isExecuting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                 {isExecuting ? 'Executing...' : `${tradeSide} ${selectedSymbol}`}
               </button>
             </div>
@@ -780,31 +912,56 @@ export default function TradeLogsPage() {
         {/* Open Positions */}
         {positions.length > 0 && (
           <div className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Open Positions</h3>
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+              Open Positions
+            </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-                    <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Side</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Size</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Entry</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Mark</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">P&L</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Leverage</th>
-                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">Action</th>
+                    <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Symbol
+                    </th>
+                    <th className="text-left py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Side
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Size
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Entry
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Mark
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      P&L
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Leverage
+                    </th>
+                    <th className="text-right py-2 px-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Action
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {positions.map((pos) => (
-                    <tr key={`${pos.symbol}-${pos.positionIdx}`} className="border-b border-gray-100 dark:border-gray-800">
-                      <td className="py-2 px-2 font-medium text-gray-900 dark:text-white">{pos.symbol}</td>
+                    <tr
+                      key={`${pos.symbol}-${pos.positionIdx}`}
+                      className="border-b border-gray-100 dark:border-gray-800"
+                    >
+                      <td className="py-2 px-2 font-medium text-gray-900 dark:text-white">
+                        {pos.symbol}
+                      </td>
                       <td className="py-2 px-2">
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                          pos.side === 'LONG' 
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                            : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                        }`}>
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            pos.side === 'LONG'
+                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                              : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                          }`}
+                        >
                           {pos.side}
                         </span>
                       </td>
@@ -817,9 +974,13 @@ export default function TradeLogsPage() {
                       <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
                         ${formatPrice(pos.markPrice)}
                       </td>
-                      <td className={`py-2 px-2 text-right font-mono text-xs font-bold ${
-                        pos.unrealisedPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                      }`}>
+                      <td
+                        className={`py-2 px-2 text-right font-mono text-xs font-bold ${
+                          pos.unrealisedPnl >= 0
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}
+                      >
                         {pos.unrealisedPnl >= 0 ? '+' : ''}${pos.unrealisedPnl.toFixed(2)}
                       </td>
                       <td className="py-2 px-2 text-right font-mono text-xs text-gray-600 dark:text-gray-300">
@@ -827,7 +988,9 @@ export default function TradeLogsPage() {
                       </td>
                       <td className="py-2 px-2 text-right">
                         <button
-                          onClick={() => closePosition(pos.symbol, pos.positionIdx, pos.size, pos.side)}
+                          onClick={() =>
+                            closePosition(pos.symbol, pos.positionIdx, pos.size, pos.side)
+                          }
                           className="px-2 py-1 text-xs font-medium bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
                         >
                           Close
@@ -844,14 +1007,50 @@ export default function TradeLogsPage() {
         {/* Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label: 'Total Trades', value: filtered.length.toString(), color: 'text-gray-900 dark:text-white' },
-            { label: 'Win Rate', value: `${winRate}%`, color: parseFloat(winRate) >= 60 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' },
-            { label: 'Wins/Losses', value: `${wins}/${losses}`, color: 'text-gray-900 dark:text-white' },
-            { label: 'Total P&L', value: `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`, color: totalPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' },
-            { label: 'Avg P&L', value: `${avgPnl >= 0 ? '+' : ''}$${avgPnl.toFixed(2)}`, color: avgPnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' },
-            { label: 'Open Positions', value: positions.length.toString(), color: 'text-yellow-600 dark:text-yellow-400' },
+            {
+              label: 'Total Trades',
+              value: filtered.length.toString(),
+              color: 'text-gray-900 dark:text-white',
+            },
+            {
+              label: 'Win Rate',
+              value: `${winRate}%`,
+              color:
+                parseFloat(winRate) >= 60
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400',
+            },
+            {
+              label: 'Wins/Losses',
+              value: `${wins}/${losses}`,
+              color: 'text-gray-900 dark:text-white',
+            },
+            {
+              label: 'Total P&L',
+              value: `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`,
+              color:
+                totalPnl >= 0
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400',
+            },
+            {
+              label: 'Avg P&L',
+              value: `${avgPnl >= 0 ? '+' : ''}$${avgPnl.toFixed(2)}`,
+              color:
+                avgPnl >= 0
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400',
+            },
+            {
+              label: 'Open Positions',
+              value: positions.length.toString(),
+              color: 'text-yellow-600 dark:text-yellow-400',
+            },
           ].map((card) => (
-            <div key={card.label} className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+            <div
+              key={card.label}
+              className="bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-3"
+            >
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{card.label}</p>
               <p className={`text-lg font-bold font-mono ${card.color}`}>{card.value}</p>
             </div>
@@ -876,8 +1075,8 @@ export default function TradeLogsPage() {
                 key={s}
                 onClick={() => setFilterSide(s)}
                 className={`px-3 py-2 text-xs font-semibold transition-colors ${
-                  filterSide === s 
-                    ? 'bg-blue-600 text-white' 
+                  filterSide === s
+                    ? 'bg-blue-600 text-white'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
               >
@@ -892,10 +1091,10 @@ export default function TradeLogsPage() {
                 onClick={() => setFilterResult(r)}
                 className={`px-3 py-2 text-xs font-semibold transition-colors ${
                   filterResult === r
-                    ? r === 'WIN' 
-                      ? 'bg-green-600 text-white' 
-                      : r === 'LOSS' 
-                        ? 'bg-red-600 text-white' 
+                    ? r === 'WIN'
+                      ? 'bg-green-600 text-white'
+                      : r === 'LOSS'
+                        ? 'bg-red-600 text-white'
                         : 'bg-blue-600 text-white'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
@@ -910,11 +1109,11 @@ export default function TradeLogsPage() {
                 key={s}
                 onClick={() => setFilterStatus(s)}
                 className={`px-3 py-2 text-xs font-semibold capitalize transition-colors ${
-                  filterStatus === s 
-                    ? s === 'open' 
-                      ? 'bg-yellow-600 text-white' 
-                      : s === 'closed' 
-                        ? 'bg-blue-600 text-white' 
+                  filterStatus === s
+                    ? s === 'open'
+                      ? 'bg-yellow-600 text-white'
+                      : s === 'closed'
+                        ? 'bg-blue-600 text-white'
                         : 'bg-gray-600 text-white'
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
@@ -925,11 +1124,7 @@ export default function TradeLogsPage() {
           </div>
           <span className="text-xs text-gray-500 dark:text-gray-400 ml-auto">
             {filtered.length} trades
-            {lastUpdate && (
-              <span className="ml-2">
-                Updated: {lastUpdate.toLocaleTimeString()}
-              </span>
-            )}
+            {lastUpdate && <span className="ml-2">Updated: {lastUpdate.toLocaleTimeString()}</span>}
           </span>
         </div>
 
@@ -977,20 +1172,24 @@ export default function TradeLogsPage() {
                       {trade.symbol}
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                        trade.side === 'LONG' 
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' 
-                          : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                      }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-bold ${
+                          trade.side === 'LONG'
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                            : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                        }`}
+                      >
                         {trade.side}
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${
-                        trade.status === 'open' 
-                          ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-                          : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                      }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium capitalize ${
+                          trade.status === 'open'
+                            ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                            : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                        }`}
+                      >
                         {trade.status}
                       </span>
                     </td>
@@ -1000,20 +1199,29 @@ export default function TradeLogsPage() {
                     <td className="px-3 py-2.5 font-mono text-xs text-gray-600 dark:text-gray-300">
                       {trade.exitPrice ? `$${formatPrice(trade.exitPrice)}` : '-'}
                     </td>
-                    <td className={`px-3 py-2.5 font-mono text-xs font-bold ${
-                      (trade.pnl ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                    }`}>
+                    <td
+                      className={`px-3 py-2.5 font-mono text-xs font-bold ${
+                        (trade.pnl ?? 0) >= 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}
+                    >
                       {(trade.pnl ?? 0) >= 0 ? '+' : ''}${(trade.pnl ?? 0).toFixed(2)}
                       <span className="text-[10px] ml-1 opacity-70">
-                        ({(trade.pnlPct ?? 0) >= 0 ? '+' : ''}{(trade.pnlPct ?? 0).toFixed(1)}%)
+                        ({(trade.pnlPct ?? 0) >= 0 ? '+' : ''}
+                        {(trade.pnlPct ?? 0).toFixed(1)}%)
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className={`text-xs font-semibold ${
-                        trade.confidence >= 85 ? 'text-green-600 dark:text-green-400' : 
-                        trade.confidence >= 75 ? 'text-yellow-600 dark:text-yellow-400' : 
-                        'text-gray-500 dark:text-gray-400'
-                      }`}>
+                      <span
+                        className={`text-xs font-semibold ${
+                          trade.confidence >= 85
+                            ? 'text-green-600 dark:text-green-400'
+                            : trade.confidence >= 75
+                              ? 'text-yellow-600 dark:text-yellow-400'
+                              : 'text-gray-500 dark:text-gray-400'
+                        }`}
+                      >
                         {trade.confidence}%
                       </span>
                     </td>
@@ -1024,24 +1232,30 @@ export default function TradeLogsPage() {
                       {trade.duration || '-'}
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium capitalize ${
-                        trade.source === 'paper' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' :
-                        trade.source === 'live' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                        'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                      }`}>
+                      <span
+                        className={`text-[11px] px-1.5 py-0.5 rounded font-medium capitalize ${
+                          trade.source === 'paper'
+                            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
+                            : trade.source === 'live'
+                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                        }`}
+                      >
                         {trade.source || 'bybit'}
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        trade.exitReason?.includes('TP') 
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
-                        trade.exitReason?.includes('SL') 
-                          ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                        trade.status === 'open'
-                          ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-                          : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                      }`}>
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded ${
+                          trade.exitReason?.includes('TP')
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                            : trade.exitReason?.includes('SL')
+                              ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                              : trade.status === 'open'
+                                ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                        }`}
+                      >
                         {trade.status === 'open' ? 'Open' : trade.exitReason || '-'}
                       </span>
                     </td>
@@ -1064,10 +1278,10 @@ export default function TradeLogsPage() {
         {/* Footer */}
         <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
           <div className="flex items-center gap-4">
-            <span>Showing {filtered.length} of {trades.length} trades</span>
-            {lastUpdate && (
-              <span>Last updated: {lastUpdate.toLocaleTimeString()}</span>
-            )}
+            <span>
+              Showing {filtered.length} of {trades.length} trades
+            </span>
+            {lastUpdate && <span>Last updated: {lastUpdate.toLocaleTimeString()}</span>}
             {isApiConnected && (
               <span className="text-green-600 dark:text-green-400">● Live data from Bybit</span>
             )}

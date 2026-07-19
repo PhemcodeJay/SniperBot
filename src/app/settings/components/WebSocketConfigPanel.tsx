@@ -18,21 +18,109 @@ interface WsChannel {
 
 // Public channels (no authentication required)
 const PUBLIC_CHANNELS: WsChannel[] = [
-  { id: 'kline_5m', label: 'Kline 5m', description: 'OHLCV candles — primary signal timeframe', topic: 'kline.5', required: true, enabled: true, category: 'public' },
-  { id: 'kline_15m', label: 'Kline 15m', description: 'OHLCV candles — trend confirmation', topic: 'kline.15', required: true, enabled: true, category: 'public' },
-  { id: 'orderbook', label: 'Order Book (L2)', description: 'Depth 50 — liquidity confirmation', topic: 'orderbook.50', required: false, enabled: true, category: 'public' },
-  { id: 'trades', label: 'Public Trades', description: 'Real-time trade stream for volume spikes', topic: 'publicTrade', required: false, enabled: true, category: 'public' },
-  { id: 'ticker', label: 'Ticker', description: '24h stats, mark price, funding rate', topic: 'tickers', required: false, enabled: false, category: 'public' },
-  { id: 'liquidation', label: 'Liquidations', description: 'Forced liquidation events for regime detection', topic: 'allLiquidation', required: false, enabled: false, category: 'public' },
+  {
+    id: 'kline_5m',
+    label: 'Kline 5m',
+    description: 'OHLCV candles — primary signal timeframe',
+    topic: 'kline.5',
+    required: true,
+    enabled: true,
+    category: 'public',
+  },
+  {
+    id: 'kline_15m',
+    label: 'Kline 15m',
+    description: 'OHLCV candles — trend confirmation',
+    topic: 'kline.15',
+    required: true,
+    enabled: true,
+    category: 'public',
+  },
+  {
+    id: 'orderbook',
+    label: 'Order Book (L2)',
+    description: 'Depth 50 — liquidity confirmation',
+    topic: 'orderbook.50',
+    required: false,
+    enabled: true,
+    category: 'public',
+  },
+  {
+    id: 'trades',
+    label: 'Public Trades',
+    description: 'Real-time trade stream for volume spikes',
+    topic: 'publicTrade',
+    required: false,
+    enabled: true,
+    category: 'public',
+  },
+  {
+    id: 'ticker',
+    label: 'Ticker',
+    description: '24h stats, mark price, funding rate',
+    topic: 'tickers',
+    required: false,
+    enabled: false,
+    category: 'public',
+  },
+  {
+    id: 'liquidation',
+    label: 'Liquidations',
+    description: 'Forced liquidation events for regime detection',
+    topic: 'allLiquidation',
+    required: false,
+    enabled: false,
+    category: 'public',
+  },
 ];
 
 // Private channels (require authentication - Unified Trading Account)
 const PRIVATE_CHANNELS: WsChannel[] = [
-  { id: 'position', label: 'Positions', description: 'Real-time position updates for Unified Account', topic: 'position', required: false, enabled: false, category: 'private' },
-  { id: 'execution', label: 'Order Execution', description: 'Order fill and execution reports', topic: 'execution', required: false, enabled: false, category: 'private' },
-  { id: 'order', label: 'Orders', description: 'Order status and updates', topic: 'order', required: false, enabled: false, category: 'private' },
-  { id: 'wallet', label: 'Wallet Balance', description: 'Unified Account balance updates', topic: 'wallet', required: false, enabled: false, category: 'private' },
-  { id: 'stop_order', label: 'Stop Orders', description: 'Stop order status updates', topic: 'stopOrder', required: false, enabled: false, category: 'private' },
+  {
+    id: 'position',
+    label: 'Positions',
+    description: 'Real-time position updates for Unified Account',
+    topic: 'position',
+    required: false,
+    enabled: false,
+    category: 'private',
+  },
+  {
+    id: 'execution',
+    label: 'Order Execution',
+    description: 'Order fill and execution reports',
+    topic: 'execution',
+    required: false,
+    enabled: false,
+    category: 'private',
+  },
+  {
+    id: 'order',
+    label: 'Orders',
+    description: 'Order status and updates',
+    topic: 'order',
+    required: false,
+    enabled: false,
+    category: 'private',
+  },
+  {
+    id: 'wallet',
+    label: 'Wallet Balance',
+    description: 'Unified Account balance updates',
+    topic: 'wallet',
+    required: false,
+    enabled: false,
+    category: 'private',
+  },
+  {
+    id: 'stop_order',
+    label: 'Stop Orders',
+    description: 'Stop order status updates',
+    topic: 'stopOrder',
+    required: false,
+    enabled: false,
+    category: 'private',
+  },
 ];
 
 // ============== BYBIT API CONFIG ==============
@@ -63,12 +151,14 @@ export default function WebSocketConfigPanel() {
   const [pingInterval, setPingInterval] = useState('20s');
   const [maxRetries, setMaxRetries] = useState('5');
   const [saved, setSaved] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connected' | 'reconnecting' | 'error' | 'authenticated'>('disconnected');
+  const [connectionStatus, setConnectionStatus] = useState<
+    'disconnected' | 'connected' | 'reconnecting' | 'error' | 'authenticated'
+  >('disconnected');
   const [receivedMessages, setReceivedMessages] = useState<number>(0);
   const [useAuth, setUseAuth] = useState<boolean>(false);
   const [apiKey, setApiKey] = useState<string>('');
   const [apiSecret, setApiSecret] = useState<string>('');
-  
+
   const unsubscribeRef = useRef<() => void | null>(null);
 
   const parseTimeToMs = (time: string): number => {
@@ -87,26 +177,29 @@ export default function WebSocketConfigPanel() {
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
       unsubscribeRef.current = null;
-      setConnectionStatus('idle');
+      setConnectionStatus('disconnected');
       return;
     }
 
-    setConnectionStatus('connecting');
+    setConnectionStatus('connected');
     setReceivedMessages(0);
     let localCount = 0;
     unsubscribeRef.current = realtimeManager.subscribeTicks((data: any) => {
       localCount++;
-      setReceivedMessages(prev => prev + 1);
+      setReceivedMessages((prev) => prev + 1);
       setConnectionStatus('connected');
-      addLog('📩 Received tick data');
+      console.log('Received tick data');
     });
 
     // If no messages after a short window, mark as error/idle
     setTimeout(() => {
       if (localCount === 0) {
         setConnectionStatus('error');
-        addLog('⚠️ No messages received during test window');
-        if (unsubscribeRef.current) { unsubscribeRef.current(); unsubscribeRef.current = null; }
+        console.log('⚠️ No messages received during test window');
+        if (unsubscribeRef.current) {
+          unsubscribeRef.current();
+          unsubscribeRef.current = null;
+        }
       }
     }, 3000);
   };
@@ -120,7 +213,11 @@ export default function WebSocketConfigPanel() {
   };
 
   const testConnection = () => {
-    if (connectionStatus === 'connected' || connectionStatus === 'reconnecting' || connectionStatus === 'authenticated') {
+    if (
+      connectionStatus === 'connected' ||
+      connectionStatus === 'reconnecting' ||
+      connectionStatus === 'authenticated'
+    ) {
       disconnectWebSocket();
       setTimeout(() => connectWebSocket(), 500);
     } else {
@@ -141,7 +238,7 @@ export default function WebSocketConfigPanel() {
   };
 
   const enabledCount = channels.filter((c) => c.enabled).length;
-  const activeTopics = channels.filter(c => c.enabled).map(c => c.topic);
+  const activeTopics = channels.filter((c) => c.enabled).map((c) => c.topic);
 
   useEffect(() => {
     return () => {
@@ -167,8 +264,8 @@ export default function WebSocketConfigPanel() {
   }, []);
 
   // Separate channels by category
-  const publicChannels = channels.filter(c => c.category === 'public');
-  const privateChannels = channels.filter(c => c.category === 'private');
+  const publicChannels = channels.filter((c) => c.category === 'public');
+  const privateChannels = channels.filter((c) => c.category === 'private');
 
   return (
     <div className="bg-card border border-border rounded-xl p-6">
@@ -178,10 +275,19 @@ export default function WebSocketConfigPanel() {
         </div>
         <div>
           <h2 className="text-foreground font-semibold text-sm">WebSocket Subscriptions</h2>
-          <p className="text-muted-foreground text-xs mt-0.5">Configure live data channels for Unified Trading Account</p>
+          <p className="text-muted-foreground text-xs mt-0.5">
+            Configure live data channels for Unified Trading Account
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted text-xs font-mono text-muted-foreground">
-          <Wifi size={11} className={connectionStatus === 'connected' || connectionStatus === 'authenticated' ? 'text-positive' : 'text-muted-foreground'} />
+          <Wifi
+            size={11}
+            className={
+              connectionStatus === 'connected' || connectionStatus === 'authenticated'
+                ? 'text-positive'
+                : 'text-muted-foreground'
+            }
+          />
           {enabledCount} active
         </div>
       </div>
@@ -189,16 +295,27 @@ export default function WebSocketConfigPanel() {
       {/* Connection Status */}
       <div className="flex items-center gap-3 mb-4 p-3 rounded-lg bg-muted/50 border border-border">
         <div className="flex items-center gap-2 flex-1">
-          <div className={`w-2 h-2 rounded-full ${
-            connectionStatus === 'connected' || connectionStatus === 'authenticated' ? 'bg-positive' :
-            connectionStatus === 'reconnecting' ? 'bg-warning' :
-            connectionStatus === 'error' ? 'bg-negative' : 'bg-muted-foreground'
-          }`} />
+          <div
+            className={`w-2 h-2 rounded-full ${
+              connectionStatus === 'connected' || connectionStatus === 'authenticated'
+                ? 'bg-positive'
+                : connectionStatus === 'reconnecting'
+                  ? 'bg-warning'
+                  : connectionStatus === 'error'
+                    ? 'bg-negative'
+                    : 'bg-muted-foreground'
+            }`}
+          />
           <span className="text-xs font-medium text-foreground">
-            {connectionStatus === 'authenticated' ? 'Authenticated' :
-             connectionStatus === 'connected' ? 'Connected' :
-             connectionStatus === 'reconnecting' ? 'Reconnecting...' :
-             connectionStatus === 'error' ? 'Error' : 'Disconnected'}
+            {connectionStatus === 'authenticated'
+              ? 'Authenticated'
+              : connectionStatus === 'connected'
+                ? 'Connected'
+                : connectionStatus === 'reconnecting'
+                  ? 'Reconnecting...'
+                  : connectionStatus === 'error'
+                    ? 'Error'
+                    : 'Disconnected'}
           </span>
           <span className="text-[10px] text-muted-foreground ml-2">Mainnet</span>
           {connectionStatus === 'authenticated' && (
@@ -214,11 +331,13 @@ export default function WebSocketConfigPanel() {
           onClick={testConnection}
           className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
             connectionStatus === 'connected' || connectionStatus === 'authenticated'
-              ? 'bg-negative text-white hover:bg-negative/90' 
+              ? 'bg-negative text-white hover:bg-negative/90'
               : 'bg-primary text-white hover:bg-primary/90'
           }`}
         >
-          {connectionStatus === 'connected' || connectionStatus === 'authenticated' ? 'Disconnect' : 'Test Connection'}
+          {connectionStatus === 'connected' || connectionStatus === 'authenticated'
+            ? 'Disconnect'
+            : 'Test Connection'}
         </button>
       </div>
 
@@ -230,10 +349,7 @@ export default function WebSocketConfigPanel() {
             <span className="text-xs font-medium text-foreground">Enable Private Streams</span>
             <span className="text-[10px] text-muted-foreground">(Position, Orders, Wallet)</span>
           </div>
-          <button
-            onClick={() => setUseAuth(!useAuth)}
-            className="shrink-0 transition-colors"
-          >
+          <button onClick={() => setUseAuth(!useAuth)} className="shrink-0 transition-colors">
             {useAuth ? (
               <ToggleRight size={22} className="text-primary" />
             ) : (
@@ -251,7 +367,9 @@ export default function WebSocketConfigPanel() {
 
       {/* Public Channels */}
       <div className="mb-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Public Channels</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+          Public Channels
+        </p>
         <div className="space-y-2">
           {publicChannels.map((ch) => (
             <div
@@ -262,7 +380,9 @@ export default function WebSocketConfigPanel() {
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className={`text-xs font-semibold ${ch.enabled ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  <p
+                    className={`text-xs font-semibold ${ch.enabled ? 'text-foreground' : 'text-muted-foreground'}`}
+                  >
                     {ch.label}
                   </p>
                   {ch.required && (
@@ -295,7 +415,9 @@ export default function WebSocketConfigPanel() {
       {/* Private Channels */}
       {useAuth && (
         <div className="mb-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Private Channels (Unified Account)</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+            Private Channels (Unified Account)
+          </p>
           <div className="space-y-2">
             {privateChannels.map((ch) => (
               <div
@@ -306,7 +428,9 @@ export default function WebSocketConfigPanel() {
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className={`text-xs font-semibold ${ch.enabled ? 'text-foreground' : 'text-muted-foreground'}`}>
+                    <p
+                      className={`text-xs font-semibold ${ch.enabled ? 'text-foreground' : 'text-muted-foreground'}`}
+                    >
                       {ch.label}
                     </p>
                     <span className="text-[9px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
@@ -323,7 +447,7 @@ export default function WebSocketConfigPanel() {
                 <button
                   onClick={() => toggleChannel(ch.id)}
                   disabled={!apiKey || !apiSecret}
-                  className={`shrink-0 transition-colors ${(!apiKey || !apiSecret) ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                  className={`shrink-0 transition-colors ${!apiKey || !apiSecret ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   {ch.enabled ? (
                     <ToggleRight size={22} className="text-primary" />
@@ -341,27 +465,45 @@ export default function WebSocketConfigPanel() {
       <div className="border-t border-border pt-4">
         <div className="flex items-center gap-2 mb-3">
           <RefreshCw size={13} className="text-muted-foreground" />
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reconnection Settings</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Reconnection Settings
+          </p>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-1.5">Reconnect Delay</label>
+            <label className="block text-[11px] text-muted-foreground mb-1.5">
+              Reconnect Delay
+            </label>
             <select
               value={reconnectDelay}
-              onChange={(e) => { setReconnectDelay(e.target.value); setSaved(false); }}
+              onChange={(e) => {
+                setReconnectDelay(e.target.value);
+                setSaved(false);
+              }}
               className="w-full bg-background border border-border rounded-lg px-2.5 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
             >
-              {['1s', '3s', '5s', '10s'].map((o) => <option key={o} value={o}>{o}</option>)}
+              {['1s', '3s', '5s', '10s'].map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
             </select>
           </div>
           <div>
             <label className="block text-[11px] text-muted-foreground mb-1.5">Ping Interval</label>
             <select
               value={pingInterval}
-              onChange={(e) => { setPingInterval(e.target.value); setSaved(false); }}
+              onChange={(e) => {
+                setPingInterval(e.target.value);
+                setSaved(false);
+              }}
               className="w-full bg-background border border-border rounded-lg px-2.5 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
             >
-              {['10s', '20s', '30s'].map((o) => <option key={o} value={o}>{o}</option>)}
+              {['10s', '20s', '30s'].map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -371,7 +513,10 @@ export default function WebSocketConfigPanel() {
               min={1}
               max={20}
               value={maxRetries}
-              onChange={(e) => { setMaxRetries(e.target.value); setSaved(false); }}
+              onChange={(e) => {
+                setMaxRetries(e.target.value);
+                setSaved(false);
+              }}
               className="w-full bg-background border border-border rounded-lg px-2.5 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
             />
           </div>
@@ -392,7 +537,9 @@ export default function WebSocketConfigPanel() {
           <AlertCircle size={12} />
           Active subscriptions: {activeTopics.join(', ')}
           {connectionStatus === 'authenticated' && (
-            <span className="ml-1 text-[10px] font-medium text-positive">🔐 Private streams active</span>
+            <span className="ml-1 text-[10px] font-medium text-positive">
+              🔐 Private streams active
+            </span>
           )}
         </div>
       )}

@@ -63,9 +63,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <div className="p-1.5 rounded-lg bg-blue-600">
               <Bot size={16} className="text-white" />
             </div>
-            <span className="text-sm font-bold text-gray-900 dark:text-white">
-              SniperBot
-            </span>
+            <span className="text-sm font-bold text-gray-900 dark:text-white">SniperBot</span>
           </div>
         )}
         {collapsed && (
@@ -97,9 +95,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               title={collapsed ? item.label : undefined}
             >
               <span className="shrink-0">{item.icon}</span>
-              {!collapsed && (
-                <span className="text-sm font-medium truncate">{item.label}</span>
-              )}
+              {!collapsed && <span className="text-sm font-medium truncate">{item.label}</span>}
             </Link>
           );
         })}
@@ -115,7 +111,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </div>
             <div className="flex items-center gap-2 mt-1">
               <Wallet size={12} className="text-gray-400" />
-              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{balanceLabel}</span>
+              <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                {balanceLabel}
+              </span>
             </div>
           </div>
         )}

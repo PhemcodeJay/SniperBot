@@ -87,7 +87,12 @@ class PnLSync {
         winRate: metrics.winRate,
       });
     } catch (error) {
-      logger.error('PnLSync', 'Sync failed', { error: error instanceof Error ? error.message : String(error) }, error as Error);
+      logger.error(
+        'PnLSync',
+        'Sync failed',
+        { error: error instanceof Error ? error.message : String(error) },
+        error as Error
+      );
     }
   }
 
@@ -120,7 +125,9 @@ class PnLSync {
           unrealizedPnl: parseFloat(pos.unrealisedPnl),
           unrealizedPct:
             parseFloat(pos.avgPrice) > 0
-              ? (parseFloat(pos.unrealisedPnl) / (parseFloat(pos.avgPrice) * Math.abs(parseFloat(pos.size)))) * 100
+              ? (parseFloat(pos.unrealisedPnl) /
+                  (parseFloat(pos.avgPrice) * Math.abs(parseFloat(pos.size)))) *
+                100
               : 0,
           liquidationPrice: parseFloat(pos.liquidationPrice),
           leverage: parseFloat(pos.leverage),
@@ -174,7 +181,7 @@ class PnLSync {
     }
 
     // Convert to shared trades
-    const trades: SharedTrade[] = positions.map(pos => ({
+    const trades: SharedTrade[] = positions.map((pos) => ({
       id: `${pos.symbol}-${pos.positionIdx}`,
       symbol: pos.symbol,
       side: pos.side.toUpperCase() as 'LONG' | 'SHORT',
@@ -210,7 +217,8 @@ class PnLSync {
       totalTrades: 0, // TODO: Fetch from trade history
       winRate: 0,
       maxDrawdown: 0,
-      riskExposure: (positions.reduce((sum, pos) => sum + pos.positionValue, 0) / (balance?.equity || 1)) * 100,
+      riskExposure:
+        (positions.reduce((sum, pos) => sum + pos.positionValue, 0) / (balance?.equity || 1)) * 100,
     };
   }
 }

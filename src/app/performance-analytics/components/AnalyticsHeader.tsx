@@ -38,7 +38,12 @@ const getApiCredentials = () => {
   };
 };
 
-const generateSignature = (apiSecret: string, timestamp: string, recvWindow: string, params: string) => {
+const generateSignature = (
+  apiSecret: string,
+  timestamp: string,
+  recvWindow: string,
+  params: string
+) => {
   const crypto = require('crypto');
   const paramStr = timestamp + apiSecret + recvWindow + params;
   return crypto.createHmac('sha256', apiSecret).update(paramStr).digest('hex');
@@ -97,22 +102,22 @@ const fetchWalletBalance = async (): Promise<{ totalEquity: number; availableBal
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -148,48 +153,47 @@ export default function AnalyticsSummaryCards() {
 
       // Fetch wallet balance
       const { totalEquity } = await fetchWalletBalance();
-      
+
       // Fetch ticker data
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
-      
+
       const tickerList = Object.values(tickers);
       const validCount = tickerList.length;
-      
+
       if (validCount === 0) {
         throw new Error('No market data available');
       }
-      
+
       // Calculate metrics from real data
       let totalVolume = 0;
       let totalChange = 0;
       let totalVolatility = 0;
       let maxChange = 0;
       let minChange = 0;
-      
+
       tickerList.forEach((ticker: any) => {
         const change24h = parseFloat(ticker.price24hPcnt) || 0;
         const volume24h = parseFloat(ticker.volume24h) || 0;
         const high24h = parseFloat(ticker.highPrice24h) || 0;
         const low24h = parseFloat(ticker.lowPrice24h) || 0;
-        
+
         totalVolume += volume24h;
         totalChange += change24h;
-        
+
         // Calculate volatility from 24h range
-        const volatility = high24h > 0 && low24h > 0 
-          ? ((high24h - low24h) / low24h) 
-          : Math.abs(change24h);
+        const volatility =
+          high24h > 0 && low24h > 0 ? (high24h - low24h) / low24h : Math.abs(change24h);
         totalVolatility += volatility;
-        
+
         if (change24h > maxChange) maxChange = change24h;
         if (change24h < minChange) minChange = change24h;
       });
-      
+
       const avgChange = validCount > 0 ? (totalChange / validCount) * 100 : 0;
       const avgVolatility = validCount > 0 ? (totalVolatility / validCount) * 100 : 0;
       const volumeUsd = totalVolume / 1e9;
       const range = (maxChange - minChange) * 100;
-      
+
       // Calculate derived metrics from real market data
       const profitFactor = Math.max(0.5, 1.5 + Math.abs(avgChange) * 0.8 + avgVolatility * 0.2);
       const sharpeRatio = Math.max(0.1, 1.2 + Math.abs(avgChange) * 0.4 + avgVolatility * 0.1);
@@ -197,7 +201,7 @@ export default function AnalyticsSummaryCards() {
       const winRate = Math.min(95, 55 + Math.abs(avgChange) * 3 + avgVolatility * 0.8);
       const avgHoldTime = 20 + Math.abs(avgChange) * 4 + avgVolatility * 3;
       const slippage = Math.min(0.15, 0.02 + (avgVolatility / 100) * 0.05);
-      
+
       const metricsData: MetricData[] = [
         {
           id: 'kpi-pf',
@@ -279,7 +283,7 @@ export default function AnalyticsSummaryCards() {
   if (isLoading) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 2xl:grid-cols-6 gap-4 mb-6">
-        {[1, 2, 3, 4, 5, 6].map(i => (
+        {[1, 2, 3, 4, 5, 6].map((i) => (
           <div key={i} className="card-surface p-4 flex items-center justify-center py-8">
             <Loader2 size={24} className="animate-spin text-primary" />
           </div>
@@ -318,7 +322,9 @@ export default function AnalyticsSummaryCards() {
               <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
                 {card.title}
               </span>
-              <div className={`w-7 h-7 rounded-md flex items-center justify-center ${VARIANT_ICON[card.variant]}`}>
+              <div
+                className={`w-7 h-7 rounded-md flex items-center justify-center ${VARIANT_ICON[card.variant]}`}
+              >
                 <Icon size={13} />
               </div>
             </div>
@@ -328,7 +334,9 @@ export default function AnalyticsSummaryCards() {
             <p className="text-[10px] text-muted-foreground leading-tight mb-1.5">
               {card.subValue}
             </p>
-            <p className={`text-[10px] font-semibold ${card.positive ? 'text-positive' : 'text-negative'}`}>
+            <p
+              className={`text-[10px] font-semibold ${card.positive ? 'text-positive' : 'text-negative'}`}
+            >
               {card.change}
             </p>
           </div>

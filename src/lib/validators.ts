@@ -20,15 +20,17 @@ export const BybitWalletResponseSchema = z.object({
         walletBalance: z.union([z.string(), z.number()]).optional(),
         equity: z.union([z.string(), z.number()]).optional(),
         // coin array can vary by API version; accept either 'coin' or 'coins' and allow flexible shapes
-        coin: z.array(
-          z.object({
-            coin: z.string().optional(),
-            equity: z.union([z.string(), z.number()]).optional(),
-            walletBalance: z.union([z.string(), z.number()]).optional(),
-            free: z.union([z.string(), z.number()]).optional(),
-            locked: z.union([z.string(), z.number()]).optional(),
-          })
-        ).optional(),
+        coin: z
+          .array(
+            z.object({
+              coin: z.string().optional(),
+              equity: z.union([z.string(), z.number()]).optional(),
+              walletBalance: z.union([z.string(), z.number()]).optional(),
+              free: z.union([z.string(), z.number()]).optional(),
+              locked: z.union([z.string(), z.number()]).optional(),
+            })
+          )
+          .optional(),
         coins: z.array(z.any()).optional(),
       })
     ),

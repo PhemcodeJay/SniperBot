@@ -12,7 +12,9 @@ export interface RealtimeDataContextType {
   refetch: () => Promise<void>;
 }
 
-export const RealtimeDataContext = React.createContext<RealtimeDataContextType | undefined>(undefined);
+export const RealtimeDataContext = React.createContext<RealtimeDataContextType | undefined>(
+  undefined
+);
 
 export function useSharedRealtimeData() {
   const context = React.useContext(RealtimeDataContext);

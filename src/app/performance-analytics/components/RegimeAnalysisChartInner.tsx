@@ -27,7 +27,15 @@ interface RegimeData {
 // ============== BYBIT API CONFIG ==============
 const BYBIT_BASE_URL = 'https://api.bybit.com';
 
-const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'];
+const SUPPORTED_SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'ADAUSDT',
+  'DOGEUSDT',
+];
 
 // ============== API HELPERS ==============
 const safeJsonParse = async (response: Response) => {
@@ -45,22 +53,22 @@ const safeJsonParse = async (response: Response) => {
 // Fetch ticker data
 const fetchTickers = async (symbols: string[]): Promise<Record<string, any>> => {
   try {
-    const promises = symbols.map(symbol =>
+    const promises = symbols.map((symbol) =>
       fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-        .then(r => safeJsonParse(r))
+        .then((r) => safeJsonParse(r))
         .catch(() => null)
     );
-    
+
     const results = await Promise.all(promises);
     const tickers: Record<string, any> = {};
-    
+
     results.forEach((data: any) => {
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const ticker = data.result.list[0];
         tickers[ticker.symbol] = ticker;
       }
     });
-    
+
     return tickers;
   } catch (error) {
     console.error('Error fetching tickers:', error);
@@ -78,7 +86,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       <p className="text-foreground font-semibold mb-2">{label} Market</p>
       {payload.map((p: any) => (
         <p key={`reg-tt-${p.name}`} style={{ color: p.color }}>
-          {p.name}: {p.value}{p.name === 'Win Rate' ? '%' : ''}
+          {p.name}: {p.value}
+          {p.name === 'Win Rate' ? '%' : ''}
         </p>
       ))}
       <p className="text-muted-foreground mt-1 text-[10px]">
@@ -101,53 +110,55 @@ export default function RegimeAnalysisChartInner() {
       // Fetch real market data
       const tickers = await fetchTickers(SUPPORTED_SYMBOLS);
       const tickerList = Object.values(tickers);
-      
+
       if (tickerList.length === 0) {
         throw new Error('No market data available');
       }
-      
+
       // Initialize regime metrics
-      const regimes: Record<string, { 
-        wins: number; 
-        trades: number; 
-        pf: number; 
-        avgChange: number; 
-        volatility: number; 
-        count: number 
-      }> = {
-        'Trending': { wins: 0, trades: 0, pf: 0, avgChange: 0, volatility: 0, count: 0 },
-        'Ranging': { wins: 0, trades: 0, pf: 0, avgChange: 0, volatility: 0, count: 0 },
-        'Volatile': { wins: 0, trades: 0, pf: 0, avgChange: 0, volatility: 0, count: 0 },
+      const regimes: Record<
+        string,
+        {
+          wins: number;
+          trades: number;
+          pf: number;
+          avgChange: number;
+          volatility: number;
+          count: number;
+        }
+      > = {
+        Trending: { wins: 0, trades: 0, pf: 0, avgChange: 0, volatility: 0, count: 0 },
+        Ranging: { wins: 0, trades: 0, pf: 0, avgChange: 0, volatility: 0, count: 0 },
+        Volatile: { wins: 0, trades: 0, pf: 0, avgChange: 0, volatility: 0, count: 0 },
       };
-      
+
       tickerList.forEach((ticker: any) => {
         const change = parseFloat(ticker.price24hPcnt) * 100;
         const high24h = parseFloat(ticker.highPrice24h);
         const low24h = parseFloat(ticker.lowPrice24h);
         const volume = parseFloat(ticker.volume24h);
-        
+
         // Calculate volatility from 24h range
-        const volatility = high24h > 0 && low24h > 0 
-          ? ((high24h - low24h) / low24h) * 100 
-          : Math.abs(change);
-        
+        const volatility =
+          high24h > 0 && low24h > 0 ? ((high24h - low24h) / low24h) * 100 : Math.abs(change);
+
         // Determine regime based on real price action
         let regime: string;
         if (Math.abs(change) > 3) regime = 'Trending';
         else if (volatility > 2) regime = 'Volatile';
         else if (Math.abs(change) > 1.5) regime = 'Ranging';
         else regime = 'Ranging';
-        
+
         // Calculate trade metrics from real data
         const tradeCount = Math.max(1, Math.round(3 + Math.abs(change) * 0.5 + volatility * 0.3));
         // Win rate based on price movement direction and magnitude
         const baseWinRate = 50 + Math.abs(change) * 1.5 + (change > 0 ? 5 : -5);
         const winRate = Math.min(90, Math.max(40, baseWinRate));
         const wins = Math.round(tradeCount * (winRate / 100));
-        
+
         // Profit factor based on volatility and trend strength
         const pf = 1 + Math.abs(change) * 0.15 + volatility * 0.05;
-        
+
         regimes[regime].trades += tradeCount;
         regimes[regime].wins += wins;
         regimes[regime].pf += pf;
@@ -155,12 +166,12 @@ export default function RegimeAnalysisChartInner() {
         regimes[regime].volatility += volatility;
         regimes[regime].count += 1;
       });
-      
+
       // Calculate final data
       const finalData: RegimeData[] = Object.entries(regimes).map(([name, stats]) => {
         const trades = stats.trades;
         const count = stats.count || 1;
-        
+
         return {
           regime: name,
           winRate: trades > 0 ? Math.round((stats.wins / trades) * 100) : 0,
@@ -170,10 +181,10 @@ export default function RegimeAnalysisChartInner() {
           volatility: stats.count > 0 ? Math.round((stats.volatility / stats.count) * 10) / 10 : 0,
         };
       });
-      
+
       // Sort by win rate descending for better display
       finalData.sort((a, b) => b.winRate - a.winRate);
-      
+
       setData(finalData);
       setError(null);
     } catch (error) {
@@ -218,7 +229,7 @@ export default function RegimeAnalysisChartInner() {
     );
   }
 
-  if (data.length === 0 || data.every(d => d.trades === 0)) {
+  if (data.length === 0 || data.every((d) => d.trades === 0)) {
     return (
       <div className="card-surface p-5 h-full">
         <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -240,9 +251,7 @@ export default function RegimeAnalysisChartInner() {
       <div className="mb-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              Performance by Market Regime
-            </h3>
+            <h3 className="text-sm font-semibold text-foreground">Performance by Market Regime</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
               Win rate and profit factor across detected regimes from real market data
             </p>
@@ -251,15 +260,8 @@ export default function RegimeAnalysisChartInner() {
       </div>
 
       <ResponsiveContainer width="100%" height={180}>
-        <BarChart
-          data={data}
-          margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-        >
-          <CartesianGrid
-            strokeDasharray="3 3"
-            stroke="var(--border)"
-            vertical={false}
-          />
+        <BarChart data={data} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
           <XAxis
             dataKey="regime"
             tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }}
@@ -274,9 +276,7 @@ export default function RegimeAnalysisChartInner() {
             domain={[0, 100]}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Legend
-            wrapperStyle={{ fontSize: '10px', color: 'var(--muted-foreground)' }}
-          />
+          <Legend wrapperStyle={{ fontSize: '10px', color: 'var(--muted-foreground)' }} />
           <Bar
             dataKey="winRate"
             name="Win Rate"
@@ -297,18 +297,40 @@ export default function RegimeAnalysisChartInner() {
       {/* Regime insights */}
       <div className="mt-3 pt-3 border-t border-border space-y-1.5">
         {data.map((r) => (
-          <div key={`regime-insight-${r.regime}`} className="flex items-center justify-between text-[10px]">
+          <div
+            key={`regime-insight-${r.regime}`}
+            className="flex items-center justify-between text-[10px]"
+          >
             <span className="text-muted-foreground">{r.regime}</span>
             <div className="flex items-center gap-3">
-              <span className={r.winRate >= 70 ? 'text-positive font-semibold' : r.winRate >= 60 ? 'text-warning font-semibold' : 'text-negative font-semibold'}>
+              <span
+                className={
+                  r.winRate >= 70
+                    ? 'text-positive font-semibold'
+                    : r.winRate >= 60
+                      ? 'text-warning font-semibold'
+                      : 'text-negative font-semibold'
+                }
+              >
                 {r.winRate}% WR
               </span>
               <span className="text-muted-foreground">{r.trades} trades</span>
-              <span className={r.profitFactor >= 2 ? 'text-positive' : r.profitFactor >= 1.5 ? 'text-warning' : 'text-negative'}>
+              <span
+                className={
+                  r.profitFactor >= 2
+                    ? 'text-positive'
+                    : r.profitFactor >= 1.5
+                      ? 'text-warning'
+                      : 'text-negative'
+                }
+              >
                 PF {r.profitFactor.toFixed(1)}
               </span>
-              <span className={`text-[9px] ${r.avgChange >= 0 ? 'text-positive' : 'text-negative'}`}>
-                {r.avgChange >= 0 ? '+' : ''}{r.avgChange.toFixed(1)}%
+              <span
+                className={`text-[9px] ${r.avgChange >= 0 ? 'text-positive' : 'text-negative'}`}
+              >
+                {r.avgChange >= 0 ? '+' : ''}
+                {r.avgChange.toFixed(1)}%
               </span>
             </div>
           </div>
@@ -317,7 +339,7 @@ export default function RegimeAnalysisChartInner() {
 
       <div className="mt-2 pt-2 border-t border-border">
         <p className="text-[9px] text-muted-foreground">
-          <span className="text-muted-foreground">Data source:</span> Bybit real-time ticker data · 
+          <span className="text-muted-foreground">Data source:</span> Bybit real-time ticker data ·
           <span className="ml-1">{SUPPORTED_SYMBOLS.length} symbols analyzed</span>
         </p>
       </div>

@@ -171,23 +171,27 @@ export function insertTrade(trade: Omit<TradeRecord, 'created_at' | 'updated_at'
 export function updateTrade(id: string, updates: Partial<TradeRecord>) {
   const db = getDatabase();
   const fields = Object.keys(updates)
-    .filter(k => k !== 'id' && k !== 'created_at')
-    .map(k => `${k} = @${k}`)
+    .filter((k) => k !== 'id' && k !== 'created_at')
+    .map((k) => `${k} = @${k}`)
     .join(', ');
   if (!fields) return;
-  const stmt = db.prepare(`UPDATE trades SET ${fields}, updated_at = (strftime('%s','now') * 1000) WHERE id = @id`);
+  const stmt = db.prepare(
+    `UPDATE trades SET ${fields}, updated_at = (strftime('%s','now') * 1000) WHERE id = @id`
+  );
   stmt.run({ ...updates, id });
 }
 
-export function getTrades(options: {
-  status?: 'open' | 'closed' | 'partial';
-  source?: 'paper' | 'live' | 'bybit';
-  symbol?: string;
-  limit?: number;
-  offset?: number;
-  orderBy?: string;
-  orderDir?: 'ASC' | 'DESC';
-} = {}): TradeRecord[] {
+export function getTrades(
+  options: {
+    status?: 'open' | 'closed' | 'partial';
+    source?: 'paper' | 'live' | 'bybit';
+    symbol?: string;
+    limit?: number;
+    offset?: number;
+    orderBy?: string;
+    orderDir?: 'ASC' | 'DESC';
+  } = {}
+): TradeRecord[] {
   const db = getDatabase();
   const conditions: string[] = [];
   const params: any = {};
@@ -211,13 +215,17 @@ export function getTrades(options: {
   const limit = options.limit || 100;
   const offset = options.offset || 0;
 
-  const stmt = db.prepare(`SELECT * FROM trades ${where} ORDER BY ${orderBy} ${orderDir} LIMIT @limit OFFSET @offset`);
+  const stmt = db.prepare(
+    `SELECT * FROM trades ${where} ORDER BY ${orderBy} ${orderDir} LIMIT @limit OFFSET @offset`
+  );
   return stmt.all({ ...params, limit, offset }) as TradeRecord[];
 }
 
 export function getTradeStats() {
   const db = getDatabase();
-  const stats = db.prepare(`
+  const stats = db
+    .prepare(
+      `
     SELECT
       COUNT(*) as total_trades,
       SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_positions,
@@ -227,11 +235,14 @@ export function getTradeStats() {
       COALESCE(SUM(pnl), 0) as total_pnl,
       COALESCE(AVG(CASE WHEN status = 'closed' THEN pnl ELSE NULL END), 0) as avg_pnl
     FROM trades
-  `).get() as any;
+  `
+    )
+    .get() as any;
 
-  const winRate = (stats.winning_trades + stats.losing_trades) > 0
-    ? (stats.winning_trades / (stats.winning_trades + stats.losing_trades)) * 100
-    : 0;
+  const winRate =
+    stats.winning_trades + stats.losing_trades > 0
+      ? (stats.winning_trades / (stats.winning_trades + stats.losing_trades)) * 100
+      : 0;
 
   return { ...stats, win_rate: Math.round(winRate * 10) / 10 };
 }
@@ -280,20 +291,22 @@ export function insertSignal(signal: Omit<SignalRecord, 'created_at'>) {
 export function updateSignal(id: string, updates: Partial<SignalRecord>) {
   const db = getDatabase();
   const fields = Object.keys(updates)
-    .filter(k => k !== 'id' && k !== 'created_at')
-    .map(k => `${k} = @${k}`)
+    .filter((k) => k !== 'id' && k !== 'created_at')
+    .map((k) => `${k} = @${k}`)
     .join(', ');
   if (!fields) return;
   const stmt = db.prepare(`UPDATE signals SET ${fields} WHERE id = @id`);
   stmt.run({ ...updates, id });
 }
 
-export function getSignals(options: {
-  status?: 'pending' | 'live' | 'rejected' | 'executed';
-  symbol?: string;
-  limit?: number;
-  offset?: number;
-} = {}): SignalRecord[] {
+export function getSignals(
+  options: {
+    status?: 'pending' | 'live' | 'rejected' | 'executed';
+    symbol?: string;
+    limit?: number;
+    offset?: number;
+  } = {}
+): SignalRecord[] {
   const db = getDatabase();
   const conditions: string[] = [];
   const params: any = {};
@@ -311,7 +324,9 @@ export function getSignals(options: {
   const limit = options.limit || 100;
   const offset = options.offset || 0;
 
-  const stmt = db.prepare(`SELECT * FROM signals ${where} ORDER BY created_at DESC LIMIT @limit OFFSET @offset`);
+  const stmt = db.prepare(
+    `SELECT * FROM signals ${where} ORDER BY created_at DESC LIMIT @limit OFFSET @offset`
+  );
   return stmt.all({ ...params, limit, offset }) as SignalRecord[];
 }
 
@@ -344,10 +359,12 @@ export function insertAlert(alert: Omit<AlertRecord, 'created_at'>) {
   stmt.run(alert);
 }
 
-export function getAlerts(options: {
-  limit?: number;
-  unreadOnly?: boolean;
-} = {}): AlertRecord[] {
+export function getAlerts(
+  options: {
+    limit?: number;
+    unreadOnly?: boolean;
+  } = {}
+): AlertRecord[] {
   const db = getDatabase();
   const conditions: string[] = [];
   const params: any = {};
@@ -372,21 +389,28 @@ export function markAlertRead(id: string) {
 
 export function setBotState(key: string, value: string) {
   const db = getDatabase();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT OR REPLACE INTO bot_state (key, value, updated_at)
     VALUES (@key, @value, (strftime('%s','now') * 1000))
-  `).run({ key, value });
+  `
+  ).run({ key, value });
 }
 
 export function getBotState(key: string): string | null {
   const db = getDatabase();
-  const row = db.prepare('SELECT value FROM bot_state WHERE key = @key').get({ key }) as { value: string } | undefined;
+  const row = db.prepare('SELECT value FROM bot_state WHERE key = @key').get({ key }) as
+    | { value: string }
+    | undefined;
   return row?.value || null;
 }
 
 export function getAllBotState(): Record<string, string> {
   const db = getDatabase();
-  const rows = db.prepare('SELECT key, value FROM bot_state').all() as { key: string; value: string }[];
+  const rows = db.prepare('SELECT key, value FROM bot_state').all() as {
+    key: string;
+    value: string;
+  }[];
   const result: Record<string, string> = {};
   for (const row of rows) {
     result[row.key] = row.value;
@@ -396,18 +420,26 @@ export function getAllBotState(): Record<string, string> {
 
 // ============== BALANCE HISTORY ==============
 
-export function recordBalanceSnapshot(totalEquity: number, availableBalance: number, baseEquity?: number) {
+export function recordBalanceSnapshot(
+  totalEquity: number,
+  availableBalance: number,
+  baseEquity?: number
+) {
   const db = getDatabase();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO balance_history (total_equity, available_balance, base_equity, timestamp)
     VALUES (@totalEquity, @availableBalance, @baseEquity, (strftime('%s','now') * 1000))
-  `).run({ totalEquity, availableBalance, baseEquity: baseEquity || totalEquity });
+  `
+  ).run({ totalEquity, availableBalance, baseEquity: baseEquity || totalEquity });
 }
 
-export function getBalanceHistory(options: {
-  limit?: number;
-  since?: number;
-} = {}): Array<{ total_equity: number; available_balance: number; timestamp: number }> {
+export function getBalanceHistory(
+  options: {
+    limit?: number;
+    since?: number;
+  } = {}
+): Array<{ total_equity: number; available_balance: number; timestamp: number }> {
   const db = getDatabase();
   const conditions: string[] = [];
   const params: any = {};
@@ -420,18 +452,23 @@ export function getBalanceHistory(options: {
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = options.limit || 500;
 
-  const stmt = db.prepare(`SELECT total_equity, available_balance, timestamp FROM balance_history ${where} ORDER BY timestamp DESC LIMIT @limit`);
+  const stmt = db.prepare(
+    `SELECT total_equity, available_balance, timestamp FROM balance_history ${where} ORDER BY timestamp DESC LIMIT @limit`
+  );
   return stmt.all({ ...params, limit }) as any[];
 }
 
 // ============== EXPORT DATA ==============
 
-export function getExportData(type: 'trades' | 'signals', options: {
-  status?: string;
-  source?: string;
-  startDate?: number;
-  endDate?: number;
-} = {}) {
+export function getExportData(
+  type: 'trades' | 'signals',
+  options: {
+    status?: string;
+    source?: string;
+    startDate?: number;
+    endDate?: number;
+  } = {}
+) {
   const db = getDatabase();
   const conditions: string[] = [];
   const params: any = {};

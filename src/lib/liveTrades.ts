@@ -64,7 +64,7 @@ export function updateLiveTrade(
   patch: Partial<LiveTradeRecord>
 ): LiveTradeRecord[] {
   const trades = readLiveTrades();
-  const idx = trades.findIndex(t => t.orderId === orderId || t.id === orderId);
+  const idx = trades.findIndex((t) => t.orderId === orderId || t.id === orderId);
   if (idx !== -1) {
     trades[idx] = { ...trades[idx], ...patch };
     writeLiveTrades(trades);
@@ -73,7 +73,7 @@ export function updateLiveTrade(
 }
 
 export function getOpenLiveTrades(): LiveTradeRecord[] {
-  return readLiveTrades().filter(t => t.status === 'open');
+  return readLiveTrades().filter((t) => t.status === 'open');
 }
 
 export function closeLiveTrade(
@@ -83,7 +83,9 @@ export function closeLiveTrade(
   closeSize?: number
 ): LiveTradeRecord[] {
   const trades = readLiveTrades();
-  const idx = trades.findIndex(t => (t.orderId === orderId || t.id === orderId) && t.status === 'open');
+  const idx = trades.findIndex(
+    (t) => (t.orderId === orderId || t.id === orderId) && t.status === 'open'
+  );
   if (idx === -1) return trades;
 
   const trade = trades[idx];

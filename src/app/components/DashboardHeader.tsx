@@ -22,12 +22,16 @@ interface HeaderData {
 
 export default function DashboardHeader() {
   const { data: realtimeData, loading: dataLoading, error: dataError } = useSharedRealtimeData();
-  
+
   const [data, setData] = useState<HeaderData>({
     status: 'connecting',
     latency: 0,
     lastUpdated: new Date().toLocaleTimeString(),
-    date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    date: new Date().toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }),
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
@@ -36,7 +40,7 @@ export default function DashboardHeader() {
   // Update data from real-time context
   useEffect(() => {
     if (realtimeData?.balance) {
-      setData(prev => ({
+      setData((prev) => ({
         ...prev,
         status: dataError ? 'disconnected' : 'authenticated',
         balance: realtimeData.balance.totalEquity,
@@ -48,9 +52,13 @@ export default function DashboardHeader() {
   // Update date every minute
   useEffect(() => {
     const timer = setInterval(() => {
-      setData(prev => ({
+      setData((prev) => ({
         ...prev,
-        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        date: new Date().toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }),
       }));
     }, 60000);
 
@@ -61,7 +69,7 @@ export default function DashboardHeader() {
     setIsRefreshing(true);
     try {
       // The real-time data will update automatically
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     } finally {
       setIsRefreshing(false);
     }
@@ -103,8 +111,9 @@ export default function DashboardHeader() {
           <div className="flex items-center gap-1.5">
             <Wifi size={11} className={statusColor[data.status]} />
             <span>
-              Bybit API · {data.status === 'connected' || data.status === 'authenticated' 
-                ? 'Live' 
+              Bybit API ·{' '}
+              {data.status === 'connected' || data.status === 'authenticated'
+                ? 'Live'
                 : statusText[data.status]}
             </span>
           </div>
@@ -120,7 +129,9 @@ export default function DashboardHeader() {
           {typeof data.balance === 'number' && data.balance > 0 && (
             <>
               <span>·</span>
-              <span className="font-mono text-foreground">Balance: {formatBalance(data.balance)}</span>
+              <span className="font-mono text-foreground">
+                Balance: {formatBalance(data.balance)}
+              </span>
             </>
           )}
           <span>·</span>
@@ -149,22 +160,26 @@ export default function DashboardHeader() {
             <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-warning border border-background" />
           )}
         </button>
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-md border ${
-          isBotActive 
-            ? 'bg-positive-subtle border-positive/20' 
-            : 'bg-muted border-border'
-        }`}>
+        <div
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-md border ${
+            isBotActive ? 'bg-positive-subtle border-positive/20' : 'bg-muted border-border'
+          }`}
+        >
           <span className="relative flex h-2 w-2">
             {isBotActive && (
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-positive opacity-75" />
             )}
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${
-              isBotActive ? 'bg-positive' : 'bg-muted-foreground'
-            }`} />
+            <span
+              className={`relative inline-flex rounded-full h-2 w-2 ${
+                isBotActive ? 'bg-positive' : 'bg-muted-foreground'
+              }`}
+            />
           </span>
-          <span className={`text-xs font-semibold ${
-            isBotActive ? 'text-positive' : 'text-muted-foreground'
-          }`}>
+          <span
+            className={`text-xs font-semibold ${
+              isBotActive ? 'text-positive' : 'text-muted-foreground'
+            }`}
+          >
             Bot {isBotActive ? 'Active' : 'Paused'}
           </span>
         </div>

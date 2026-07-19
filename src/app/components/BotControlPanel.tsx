@@ -3,7 +3,12 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { BYBIT_BASE_URL, createBybitAuthHeaders, getBybitCredentials, safeJsonParse } from '@/lib/bybit';
+import {
+  BYBIT_BASE_URL,
+  createBybitAuthHeaders,
+  getBybitCredentials,
+  safeJsonParse,
+} from '@/lib/bybit';
 import {
   Power,
   AlertTriangle,
@@ -21,7 +26,10 @@ import { toast } from 'sonner';
 import { realtimeManager } from '@/lib/realtimeManager';
 
 interface SystemStatus {
-  websocket: { status: 'connected' | 'disconnected' | 'connecting' | 'authenticated'; latency: number };
+  websocket: {
+    status: 'connected' | 'disconnected' | 'connecting' | 'authenticated';
+    latency: number;
+  };
   signalEngine: { status: 'running' | 'paused' | 'idle'; lastRun: string };
   mlModel: { version: string; lastRetrain: string; accuracy: number };
   account: { type: string; uid: string; connected: boolean };
@@ -120,7 +128,12 @@ const fetchPositions = async (): Promise<Position[]> => {
 };
 
 // Close position
-const closePositionOnBybit = async (symbol: string, positionIdx: number, size: number, side: 'long' | 'short'): Promise<boolean> => {
+const closePositionOnBybit = async (
+  symbol: string,
+  positionIdx: number,
+  size: number,
+  side: 'long' | 'short'
+): Promise<boolean> => {
   try {
     const { apiKey, apiSecret } = getApiCredentials();
     if (!apiKey || !apiSecret) return false;
@@ -188,7 +201,7 @@ export default function BotControlPanel() {
       // Fetch account info
       const accountInfo = await fetchAccountInfo();
       if (accountInfo) {
-        setSystemStatus(prev => ({
+        setSystemStatus((prev) => ({
           ...prev,
           account: {
             type: accountInfo.type,
@@ -210,7 +223,7 @@ export default function BotControlPanel() {
       setPaperDay(day);
 
       // Calculate ML accuracy from market data (simplified)
-      setSystemStatus(prev => ({
+      setSystemStatus((prev) => ({
         ...prev,
         mlModel: {
           ...prev.mlModel,
@@ -218,7 +231,6 @@ export default function BotControlPanel() {
           lastRetrain: new Date().toLocaleDateString(),
         },
       }));
-
     } catch (error) {
       console.error('Error fetching system status:', error);
     } finally {
@@ -227,14 +239,16 @@ export default function BotControlPanel() {
   };
 
   // Use singleton realtime manager for ticks
-  const disconnectWebSocket = () => { /* noop - singleton handles lifecycle */ };
+  const disconnectWebSocket = () => {
+    /* noop - singleton handles lifecycle */
+  };
 
   useEffect(() => {
     fetchSystemStatus();
 
     const unsubscribe = realtimeManager.subscribeTicks(() => {
       setLastScan(new Date().toLocaleTimeString());
-      setSystemStatus(prev => ({
+      setSystemStatus((prev) => ({
         ...prev,
         signalEngine: { ...prev.signalEngine, lastRun: new Date().toLocaleTimeString() },
       }));
@@ -258,10 +272,12 @@ export default function BotControlPanel() {
 
   const handleToggleConfirm = () => {
     setBotActive((v) => !v);
-    toast.success(botActive ? 'Bot paused — no new signals will execute' : 'Bot resumed — scanning markets');
+    toast.success(
+      botActive ? 'Bot paused — no new signals will execute' : 'Bot resumed — scanning markets'
+    );
     setToggleModal(false);
 
-    setSystemStatus(prev => ({
+    setSystemStatus((prev) => ({
       ...prev,
       signalEngine: {
         ...prev.signalEngine,
@@ -294,7 +310,7 @@ export default function BotControlPanel() {
       });
       setEmergencyModal(false);
 
-      setSystemStatus(prev => ({
+      setSystemStatus((prev) => ({
         ...prev,
         signalEngine: { ...prev.signalEngine, status: 'idle' },
       }));
@@ -340,30 +356,43 @@ export default function BotControlPanel() {
   const statusItems = [
     {
       label: 'WebSocket',
-      status: systemStatus.websocket.status === 'authenticated' ? `Authenticated (${systemStatus.websocket.latency}ms)` :
-              systemStatus.websocket.status === 'connected' ? `Connected (${systemStatus.websocket.latency}ms)` :
-              systemStatus.websocket.status === 'connecting' ? 'Connecting...' : 'Disconnected',
-      ok: systemStatus.websocket.status === 'connected' || systemStatus.websocket.status === 'authenticated',
-      icon: Wifi
+      status:
+        systemStatus.websocket.status === 'authenticated'
+          ? `Authenticated (${systemStatus.websocket.latency}ms)`
+          : systemStatus.websocket.status === 'connected'
+            ? `Connected (${systemStatus.websocket.latency}ms)`
+            : systemStatus.websocket.status === 'connecting'
+              ? 'Connecting...'
+              : 'Disconnected',
+      ok:
+        systemStatus.websocket.status === 'connected' ||
+        systemStatus.websocket.status === 'authenticated',
+      icon: Wifi,
     },
     {
       label: 'Signal Engine',
-      status: systemStatus.signalEngine.status === 'running' ? 'Running' :
-              systemStatus.signalEngine.status === 'paused' ? 'Paused' : 'Idle',
+      status:
+        systemStatus.signalEngine.status === 'running'
+          ? 'Running'
+          : systemStatus.signalEngine.status === 'paused'
+            ? 'Paused'
+            : 'Idle',
       ok: systemStatus.signalEngine.status === 'running',
-      icon: Cpu
+      icon: Cpu,
     },
     {
       label: 'Account',
-      status: systemStatus.account.connected ? `${systemStatus.account.type} (${systemStatus.account.uid})` : 'Not Connected',
+      status: systemStatus.account.connected
+        ? `${systemStatus.account.type} (${systemStatus.account.uid})`
+        : 'Not Connected',
       ok: systemStatus.account.connected,
-      icon: Shield
+      icon: Shield,
     },
     {
       label: 'ML Model',
       status: `${systemStatus.mlModel.version} · Acc: ${(systemStatus.mlModel.accuracy * 100).toFixed(1)}%`,
       ok: true,
-      icon: Settings2
+      icon: Settings2,
     },
   ];
 
@@ -382,9 +411,13 @@ export default function BotControlPanel() {
               {botActive && (
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-positive opacity-75" />
               )}
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${botActive ? 'bg-positive' : 'bg-muted-foreground'}`} />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${botActive ? 'bg-positive' : 'bg-muted-foreground'}`}
+              />
             </span>
-            <span className={`text-xs font-semibold ${botActive ? 'text-positive' : 'text-muted-foreground'}`}>
+            <span
+              className={`text-xs font-semibold ${botActive ? 'text-positive' : 'text-muted-foreground'}`}
+            >
               {botActive ? 'ACTIVE' : 'PAUSED'}
             </span>
           </div>
@@ -395,9 +428,7 @@ export default function BotControlPanel() {
           <div className="flex items-center justify-between p-3 rounded-lg bg-info-subtle border border-info/20">
             <div className="flex items-center gap-2">
               <Database size={13} className="text-info" />
-              <span className="text-xs font-semibold text-info">
-                PAPER TRADING MODE
-              </span>
+              <span className="text-xs font-semibold text-info">PAPER TRADING MODE</span>
               {systemStatus.websocket.status === 'connected' && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
                   🔗 Connected
@@ -417,12 +448,17 @@ export default function BotControlPanel() {
             {statusItems.map((item) => {
               const Icon = item.icon;
               return (
-                <div key={`status-${item.label}`} className="flex items-center justify-between py-1.5">
+                <div
+                  key={`status-${item.label}`}
+                  className="flex items-center justify-between py-1.5"
+                >
                   <div className="flex items-center gap-2">
                     <Icon size={12} className="text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">{item.label}</span>
                   </div>
-                  <span className={`text-[10px] font-semibold font-mono ${item.ok ? 'text-positive' : 'text-warning'}`}>
+                  <span
+                    className={`text-[10px] font-semibold font-mono ${item.ok ? 'text-positive' : 'text-warning'}`}
+                  >
                     {item.status}
                   </span>
                 </div>
@@ -513,7 +549,9 @@ export default function BotControlPanel() {
           {/* Last Scan */}
           <div className="pt-1 border-t border-border flex items-center justify-between text-[10px] text-muted-foreground">
             <span>Last full scan</span>
-            <span className="font-mono">{lastScan} · {botActive ? 'Active' : 'Paused'}</span>
+            <span className="font-mono">
+              {lastScan} · {botActive ? 'Active' : 'Paused'}
+            </span>
             <span className="flex items-center gap-1 text-primary">
               Next in {nextScan} <ChevronRight size={9} />
             </span>

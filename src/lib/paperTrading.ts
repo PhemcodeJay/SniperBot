@@ -19,9 +19,9 @@ export interface PaperPosition {
   stopLoss: number;
   takeProfit: number;
   entryTimestamp: number;
-  highestPrice?: number;  // For trailing stops
-  lowestPrice?: number;   // For trailing stops
-  tp1Hit?: boolean;       // Partial profit taking
+  highestPrice?: number; // For trailing stops
+  lowestPrice?: number; // For trailing stops
+  tp1Hit?: boolean; // Partial profit taking
   breakevenSet?: boolean; // Move SL to breakeven after TP1
 }
 
@@ -107,22 +107,25 @@ export function openPaperPosition(
   confidence: number = 80
 ): { success: boolean; error?: string; positionId?: string } {
   const state = getPaperState();
-  
+
   // Risk checks
   const notional = size * entryPrice;
   const requiredMargin = notional / leverage;
-  
+
   // Check if we have enough balance (use 80% max to leave room)
   const maxAllowedMargin = state.balance * 0.8;
   if (requiredMargin > maxAllowedMargin) {
-    return { success: false, error: `Insufficient paper balance. Required: $${requiredMargin.toFixed(2)}, Available: $${state.balance.toFixed(2)}` };
+    return {
+      success: false,
+      error: `Insufficient paper balance. Required: $${requiredMargin.toFixed(2)}, Available: $${state.balance.toFixed(2)}`,
+    };
   }
-  
+
   // Check max positions (scalping: max 3 open positions)
   if (state.positions.length >= 3) {
     return { success: false, error: 'Maximum 3 open positions allowed for scalping' };
   }
-  
+
   // Check cooldown (minimum 30s between trades to overtrading)
   const now = Date.now();
   if (now - state.lastTradeTime < 30000) {
@@ -155,12 +158,12 @@ export function openPaperPosition(
   const riskAmount = Math.abs(entryPrice - stopLoss) * size;
   state.balance -= riskAmount;
   state.lastTradeTime = now;
-  
+
   // Update peak balance
   if (state.balance > state.peakBalance) {
     state.peakBalance = state.balance;
   }
-  
+
   savePaperState(state);
   return { success: true, positionId: position.id };
 }
@@ -172,7 +175,7 @@ export function closePaperPosition(
   closeSize?: number
 ): { success: boolean; error?: string; pnl?: number } {
   const state = getPaperState();
-  const idx = state.positions.findIndex(p => p.id === positionId);
+  const idx = state.positions.findIndex((p) => p.id === positionId);
   if (idx === -1) return { success: false, error: 'Position not found' };
 
   const pos = state.positions[idx];
@@ -219,7 +222,7 @@ export function closePaperPosition(
   if (state.closedTrades.length > 200) {
     state.closedTrades = state.closedTrades.slice(-200);
   }
-  
+
   if (trade.pnl > 0) {
     state.wins++;
     state.consecutiveLosses = 0;
@@ -255,9 +258,13 @@ export function updatePaperPositions(tickers: Record<string, any>): void {
     if (!isFinite(currentPrice) || currentPrice <= 0) continue;
 
     pos.currentPrice = currentPrice;
-    const move = pos.side === 'LONG' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
+    const move =
+      pos.side === 'LONG' ? currentPrice - pos.entryPrice : pos.entryPrice - currentPrice;
     pos.pnl = Math.round(move * pos.size * 100) / 100;
-    pos.pnlPct = pos.entryPrice > 0 ? Math.round((pos.pnl / (pos.entryPrice * Math.abs(pos.size))) * 1000) / 10 : 0;
+    pos.pnlPct =
+      pos.entryPrice > 0
+        ? Math.round((pos.pnl / (pos.entryPrice * Math.abs(pos.size))) * 1000) / 10
+        : 0;
     pos.duration = `${Math.floor((Date.now() - pos.entryTimestamp) / 60000)}m`;
     changed = true;
 
@@ -302,12 +309,15 @@ export function updatePaperPositions(tickers: Record<string, any>): void {
 
     // Partial TP at 50% of target (take profit halfway)
     if (!pos.tp1Hit) {
-      const halfwayTP = pos.side === 'LONG'
-        ? pos.entryPrice + (pos.takeProfit - pos.entryPrice) * 0.5
-        : pos.entryPrice - (pos.entryPrice - pos.takeProfit) * 0.5;
-      
-      if ((pos.side === 'LONG' && currentPrice >= halfwayTP) || 
-          (pos.side === 'SHORT' && currentPrice <= halfwayTP)) {
+      const halfwayTP =
+        pos.side === 'LONG'
+          ? pos.entryPrice + (pos.takeProfit - pos.entryPrice) * 0.5
+          : pos.entryPrice - (pos.entryPrice - pos.takeProfit) * 0.5;
+
+      if (
+        (pos.side === 'LONG' && currentPrice >= halfwayTP) ||
+        (pos.side === 'SHORT' && currentPrice <= halfwayTP)
+      ) {
         // Take partial profit (50%)
         const halfSize = pos.size * 0.5;
         closePaperPosition(pos.id, currentPrice, 'TP1_PARTIAL', halfSize);

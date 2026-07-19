@@ -70,11 +70,11 @@ class Logger {
     let filtered = [...this.logs];
 
     if (service) {
-      filtered = filtered.filter(log => log.service === service);
+      filtered = filtered.filter((log) => log.service === service);
     }
 
     if (level) {
-      filtered = filtered.filter(log => log.level === level);
+      filtered = filtered.filter((log) => log.level === level);
     }
 
     return filtered.slice(-limit);
@@ -94,9 +94,13 @@ class Logger {
   private logToConsole(entry: LogEntry) {
     const prefix = `[${entry.timestamp}] [${entry.service}]`;
     const method = entry.level === 'error' ? 'error' : entry.level === 'warn' ? 'warn' : 'log';
-    
+
     // Format data for better readability
-    const dataStr = entry.data ? (typeof entry.data === 'string' ? entry.data : JSON.stringify(entry.data)) : '';
+    const dataStr = entry.data
+      ? typeof entry.data === 'string'
+        ? entry.data
+        : JSON.stringify(entry.data)
+      : '';
     (console[method as keyof typeof console] as any)(prefix, entry.message, dataStr);
 
     if (entry.stack) {
@@ -108,10 +112,7 @@ class Logger {
     // Send critical errors to monitoring service (e.g., Sentry, LogRocket)
     if (typeof window !== 'undefined' && window.parent !== window) {
       try {
-        window.parent.postMessage(
-          { type: 'error-log', entry },
-          '*'
-        );
+        window.parent.postMessage({ type: 'error-log', entry }, '*');
       } catch (e) {
         // Silently fail
       }

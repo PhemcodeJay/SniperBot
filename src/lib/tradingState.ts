@@ -85,7 +85,12 @@ export interface SharedMetrics {
   riskExposure: number;
 }
 
-export function calculateLivePnl(entryPrice: number, currentPrice: number, size: number, side: 'LONG' | 'SHORT' | 'long' | 'short') {
+export function calculateLivePnl(
+  entryPrice: number,
+  currentPrice: number,
+  size: number,
+  side: 'LONG' | 'SHORT' | 'long' | 'short'
+) {
   const normalizedSide = side.toUpperCase() as 'LONG' | 'SHORT';
   const move = normalizedSide === 'LONG' ? currentPrice - entryPrice : entryPrice - currentPrice;
   const pnl = move * size;

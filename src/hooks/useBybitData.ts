@@ -6,8 +6,16 @@ import { requestManager } from '@/lib/requestManager';
 import { logger } from '@/lib/logger';
 
 // Module-level short-lived caches to de-duplicate identical requests
-const balanceCache: { data: any | null; ts: number; promise: Promise<any> | null } = { data: null, ts: 0, promise: null };
-const positionsCache: { data: any[] | null; ts: number; promise: Promise<any> | null } = { data: null, ts: 0, promise: null };
+const balanceCache: { data: any | null; ts: number; promise: Promise<any> | null } = {
+  data: null,
+  ts: 0,
+  promise: null,
+};
+const positionsCache: { data: any[] | null; ts: number; promise: Promise<any> | null } = {
+  data: null,
+  ts: 0,
+  promise: null,
+};
 
 // ============== BALANCE HOOK ==============
 export interface BalanceData {
@@ -35,7 +43,7 @@ export function useBybitBalance(autoRefresh = true) {
       // Use shared short-lived cache to avoid multiple components triggering
       // simultaneous identical requests.
       const now = Date.now();
-      if (balanceCache.data && (now - balanceCache.ts) < 5000) {
+      if (balanceCache.data && now - balanceCache.ts < 5000) {
         setData(balanceCache.data);
         setError(null);
         return;
@@ -48,16 +56,13 @@ export function useBybitBalance(autoRefresh = true) {
         return;
       }
 
-      balanceCache.promise = requestManager.executeWithRateLimit<any>(
-        '/api/bybit',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            endpoint: '/v5/account/wallet-balance',
-            method: 'GET',
-          }),
-        }
-      );
+      balanceCache.promise = requestManager.executeWithRateLimit<any>('/api/bybit', {
+        method: 'POST',
+        body: JSON.stringify({
+          endpoint: '/v5/account/wallet-balance',
+          method: 'GET',
+        }),
+      });
 
       const response = await balanceCache.promise;
       balanceCache.promise = null;
@@ -66,7 +71,9 @@ export function useBybitBalance(autoRefresh = true) {
         const wallet = response.result.list[0];
         const parsed = {
           totalEquity: parseFloat(wallet.totalEquity || wallet.equity || '0'),
-          availableBalance: parseFloat(wallet.totalAvailableBalance || wallet.availableBalance || wallet.walletBalance || '0'),
+          availableBalance: parseFloat(
+            wallet.totalAvailableBalance || wallet.availableBalance || wallet.walletBalance || '0'
+          ),
           totalMarginBalance: parseFloat(wallet.totalMarginBalance || '0'),
           coins: wallet.coin || [],
         };
@@ -129,7 +136,7 @@ export function useBybitPositions(autoRefresh = true) {
     try {
       setLoading(true);
       const now = Date.now();
-      if (positionsCache.data && (now - positionsCache.ts) < 3000) {
+      if (positionsCache.data && now - positionsCache.ts < 3000) {
         setData(positionsCache.data);
         setError(null);
         return;
@@ -142,16 +149,13 @@ export function useBybitPositions(autoRefresh = true) {
         return;
       }
 
-      positionsCache.promise = requestManager.executeWithRateLimit<any>(
-        '/api/bybit',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            endpoint: '/v5/position/list',
-            method: 'GET',
-          }),
-        }
-      );
+      positionsCache.promise = requestManager.executeWithRateLimit<any>('/api/bybit', {
+        method: 'POST',
+        body: JSON.stringify({
+          endpoint: '/v5/position/list',
+          method: 'GET',
+        }),
+      });
 
       const response = await positionsCache.promise;
       positionsCache.promise = null;
@@ -208,16 +212,13 @@ export function useBybitAccountInfo() {
   useEffect(() => {
     const fetchInfo = async () => {
       try {
-        const response = await requestManager.executeWithRateLimit<any>(
-          '/api/bybit',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              endpoint: '/v5/account/info',
-              method: 'GET',
-            }),
-          }
-        );
+        const response = await requestManager.executeWithRateLimit<any>('/api/bybit', {
+          method: 'POST',
+          body: JSON.stringify({
+            endpoint: '/v5/account/info',
+            method: 'GET',
+          }),
+        });
 
         if (response.retCode === 0 && response.result) {
           setData({
@@ -286,7 +287,7 @@ export function useBybitConnection() {
           throw new Error('API returned error');
         }
       } catch (err) {
-        setStatus(prev => ({
+        setStatus((prev) => ({
           ...prev,
           status: 'disconnected',
           lastChecked: new Date(),
@@ -325,13 +326,10 @@ export function useExecuteOrder() {
       setExecuting(true);
       setError(null);
 
-      const response = await requestManager.executeWithRateLimit<any>(
-        '/api/bybit/orders',
-        {
-          method: 'POST',
-          body: JSON.stringify(params),
-        }
-      );
+      const response = await requestManager.executeWithRateLimit<any>('/api/bybit/orders', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      });
 
       if (!response.success) {
         throw new Error(response.error || 'Execution failed');
