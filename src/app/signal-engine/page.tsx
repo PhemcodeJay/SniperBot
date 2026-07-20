@@ -44,26 +44,6 @@ import {
   Loader2,
 } from 'lucide-react';
 
-// Start auto-executor when bot starts (for paper mode signal execution)
-useEffect(() => {
-  const onBotStarted = () => {
-    autoExecutor.setMode('paper');
-    autoExecutor.setConfig({ enabled: true });
-    autoExecutor.start();
-  };
-  const onBotStopped = () => {
-    autoExecutor.stop();
-  };
-
-  window.addEventListener('bot-started', onBotStarted);
-  window.addEventListener('bot-stopped', onBotStopped);
-
-  return () => {
-    window.removeEventListener('bot-started', onBotStarted);
-    window.removeEventListener('bot-stopped', onBotStopped);
-  };
-}, []);
-
 interface Signal extends SharedSignal {
   volumeSpike: number;
   rsi: number;
