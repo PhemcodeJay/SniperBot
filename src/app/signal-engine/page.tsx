@@ -22,7 +22,7 @@ import {
 } from '@/lib/tradingState';
 import { readLiveTrades, writeLiveTrades } from '@/lib/liveTrades';
 import { autoExecutor } from '@/lib/autoExecutor';
-import { getPaperState } from '@/lib/paperTrading';
+import { getPaperState, openPaperPosition } from '@/lib/paperTrading';
 import {
   Zap,
   TrendingUp,
@@ -541,11 +541,61 @@ export default function SignalEnginePage() {
     }
   };
 
-  const handleExecuteSignal = async (signal: Signal) => {
+  const handleExecuteSignal = async (signal: Signal, mode: 'paper' | 'live' = 'paper') => {
     setExecutingSignalId(signal.id);
     setError(null);
 
     try {
+      // PAPER TRADING MODE - No API credentials required
+      if (mode === 'paper') {
+        const tickers = await fetchTickers([signal.symbol]);
+        const ticker = tickers[signal.symbol];
+        if (!ticker) {
+          throw new Error('Could not fetch live price for paper trade');
+        }
+        const entryPrice = parseFloat(ticker.lastPrice);
+        if (isNaN(entryPrice) || entryPrice <= 0) {
+          throw new Error('Invalid live price for paper trade');
+        }
+
+        // Calculate size and leverage for paper trading
+        const atr = (parseFloat(ticker.highPrice24h) - parseFloat(ticker.lowPrice24h)) / 4;
+        const size = 0.001; // Default paper trading size
+        const leverage = 5;
+
+        const result = openPaperPosition(
+          signal.symbol,
+          signal.direction,
+          entryPrice,
+          size,
+          leverage,
+          signal.sl,
+          signal.tp1
+        );
+
+        if (result.success) {
+          appendSharedAlert({
+            id: `alert-paper-${signal.id}-${Date.now()}`,
+            type: 'trade',
+            priority: 'high',
+            title: '📄 Paper Trade Executed',
+            message: `${signal.direction} ${signal.symbol} opened at $${entryPrice.toFixed(2)} with ${leverage}x leverage (Paper Mode)`,
+            time: new Date().toLocaleTimeString(),
+            read: false,
+            timestamp: Date.now(),
+            symbol: signal.symbol,
+            price: entryPrice,
+          });
+          setSignals((prev) =>
+            prev.map((s) => (s.id === signal.id ? { ...s, status: 'executed' } : s))
+          );
+        } else {
+          throw new Error(result.error || 'Paper trade failed');
+        }
+        return;
+      }
+
+      // LIVE TRADING MODE - Requires API credentials
       const { apiKey, apiSecret } = getApiCredentials();
       if (!apiKey || !apiSecret) {
         throw new Error('Live trading credentials are not configured. Add them in Settings first.');
@@ -728,6 +778,12 @@ export default function SignalEnginePage() {
           return 0;
       }
     });
+
+  // Check if API credentials are available for live trading
+  const hasValidCredentials = useCallback(() => {
+    const { apiKey, apiSecret } = getApiCredentials();
+    return !!(apiKey && apiSecret);
+  }, []);
 
   if (isLoading && signals.length === 0) {
     return (
@@ -1040,17 +1096,34 @@ export default function SignalEnginePage() {
                           </button>
                           <div className="flex items-center gap-1 shrink-0">
                             {signal.status === 'pending' && (
-                              <button
-                                onClick={() => void handleExecuteSignal(signal)}
-                                disabled={executingSignalId === signal.id}
-                                className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
-                              >
-                                {executingSignalId === signal.id ? (
-                                  <Loader2 size={12} className="animate-spin" />
-                                ) : (
-                                  'Live'
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => void handleExecuteSignal(signal, 'paper')}
+                                  disabled={executingSignalId === signal.id}
+                                  className="px-2 py-1 text-[11px] font-semibold rounded bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-60"
+                                  title="Execute in Paper Trading mode"
+                                >
+                                  {executingSignalId === signal.id ? (
+                                    <Loader2 size={12} className="animate-spin" />
+                                  ) : (
+                                    '📄 Paper'
+                                  )}
+                                </button>
+                                {hasValidCredentials() && (
+                                  <button
+                                    onClick={() => void handleExecuteSignal(signal, 'live')}
+                                    disabled={executingSignalId === signal.id}
+                                    className="px-2 py-1 text-[11px] font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+                                    title="Execute in Live Trading mode (requires API credentials)"
+                                  >
+                                    {executingSignalId === signal.id ? (
+                                      <Loader2 size={12} className="animate-spin" />
+                                    ) : (
+                                      '⚡ Live'
+                                    )}
+                                  </button>
                                 )}
-                              </button>
+                              </div>
                             )}
                             <button
                               onClick={() => setExpandedId(isExpanded ? null : signal.id)}

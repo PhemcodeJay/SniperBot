@@ -19,7 +19,7 @@ const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN || '';
 
 // Validate credentials exist
 if (!API_KEY || !API_SECRET) {
-  logger.warn('Bybit API', 'Missing API credentials in environment variables');
+  logger.warn('Bybit API', 'Missing API credentials in environment variables - Paper Trading mode only');
 }
 
 // Simple bearer token check to prevent unauthenticated access to the API proxy
@@ -44,6 +44,11 @@ async function createBybitSignature(
   recvWindow: string,
   payload: string
 ): Promise<string> {
+  // Return empty signature if no API secret is configured (paper trading mode)
+  if (!API_SECRET) {
+    return 'paper_mode_no_signature';
+  }
+
   const originString = `${timestamp}${API_KEY}${recvWindow}${payload}`;
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -88,6 +93,13 @@ async function ensureServerTimeSynced() {
   const now = Date.now();
   // Refresh cache every 60s
   if (serverTimeOffsetMs !== null && now - serverTimeCachedAt < 60000) return;
+
+  // Skip time sync if no API credentials (paper mode)
+  if (!API_SECRET) {
+    serverTimeOffsetMs = 0;
+    serverTimeCachedAt = Date.now();
+    return;
+  }
 
   try {
     const resp = await fetch(`${BYBIT_BASE_URL}/v5/market/time`);
@@ -141,6 +153,49 @@ export async function POST(req: NextRequest) {
 
     if (!endpoint) {
       return NextResponse.json({ error: 'Missing endpoint parameter' }, { status: 400 });
+    }
+
+    // If no API credentials, return mock/paper trading data
+    if (!API_SECRET) {
+      logger.debug('Bybit API', 'No credentials - returning mock data for paper trading');
+
+      // Return mock wallet balance for paper trading
+      if (endpoint.includes('wallet-balance')) {
+        return NextResponse.json({
+          totalEquity: 100,
+          availableBalance: 100,
+          unrealisedPnl: 0,
+        });
+      }
+
+      // Return empty positions for paper trading
+      if (endpoint.includes('position/list')) {
+        return NextResponse.json({ list: [] });
+      }
+
+      // Return error for order endpoints in paper mode
+      if (endpoint.includes('order/create')) {
+        return NextResponse.json({
+          retCode: 0,
+          retMsg: 'Paper trade executed successfully',
+          result: { orderId: `paper-${Date.now()}` },
+        });
+      }
+
+      // Return empty signal for tickers (will be fetched directly by client)
+      if (endpoint.includes('tickers')) {
+        return NextResponse.json({ retCode: 0, result: { list: [] } });
+      }
+
+      // Return mock time response
+      if (endpoint.includes('market/time')) {
+        return NextResponse.json({
+          retCode: 0,
+          result: { timeSecond: Math.floor(Date.now() / 1000).toString() },
+        });
+      }
+
+      return NextResponse.json({ retCode: 0, result: {} });
     }
 
     try {
