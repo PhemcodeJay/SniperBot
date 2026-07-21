@@ -18,7 +18,8 @@ import {
   addLiveTrade,
   type LiveTradeRecord,
 } from './liveTrades';
-import { placeBybitOrder, BYBIT_BASE_URL } from './bybit';
+import { BYBIT_BASE_URL } from './bybit';
+import { requestManager } from './requestManager';
 
 // Whitelist of supported symbols to prevent injection attacks
 const SUPPORTED_SYMBOLS = new Set([
@@ -319,16 +320,18 @@ class AutoExecutor {
         } else {
           throw new Error(result.error || 'Paper trade failed');
         }
-      } else {
-        // Live trading execution
-        const orderResult = await placeBybitOrder({
-          symbol: signal.symbol,
-          side: signal.direction,
-          qty: normalizedQty,
-          leverage,
-          stopLoss: sl,
-          takeProfit: tp,
-        });
+       } else {
+         // Live trading execution - use secure server-side API proxy
+         const orderResult = await this.executeLiveOrder({
+           symbol: signal.symbol,
+           side: signal.direction,
+           qty: normalizedQty,
+           leverage,
+           stopLoss: sl,
+           takeProfit: tp,
+           confidence: signal.confidence,
+           signalId: signal.id,
+         });
 
         if (orderResult.success) {
           this.executedSignals.add(signal.id);
@@ -406,6 +409,41 @@ class AutoExecutor {
         timestamp: Date.now(),
         symbol: signal.symbol,
       });
+    }
+  }
+
+  private async executeLiveOrder(params: {
+    symbol: string;
+    side: 'LONG' | 'SHORT';
+    qty: number;
+    leverage: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    confidence: number;
+    signalId: string;
+  }): Promise<{ success: boolean; orderId?: string; error?: string }> {
+    try {
+      const response = await requestManager.executeWithRateLimit<any>('/api/bybit/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbol: params.symbol,
+          side: params.side === 'LONG' ? 'Buy' : 'Sell',
+          orderType: 'Market',
+          qty: params.qty.toString(),
+          leverage: params.leverage,
+          stopLoss: params.stopLoss?.toString(),
+          takeProfit: params.takeProfit?.toString(),
+          confidence: params.confidence,
+          signalId: params.signalId,
+        }),
+      });
+
+      return response;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Order execution failed',
+      };
     }
   }
 
