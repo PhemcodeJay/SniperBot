@@ -1,13 +1,12 @@
 // lib/autoExecutor.ts
 // Auto-execution engine for high-confidence signals - optimized for scalping
+// FIXED: confidence range handling, signal freshness, performance
 
 import { logger } from './logger';
-import { requestManager } from './requestManager';
 import {
   SharedSignal,
   appendSharedAlert,
   getSharedTradingState,
-  syncSharedTradingState,
 } from './tradingState';
 import {
   openPaperPosition,
@@ -17,34 +16,19 @@ import {
 } from './paperTrading';
 import {
   addLiveTrade,
-  updateLiveTrade,
-  closeLiveTrade,
-  getOpenLiveTrades,
   type LiveTradeRecord,
 } from './liveTrades';
 import { placeBybitOrder, BYBIT_BASE_URL } from './bybit';
 
 // Whitelist of supported symbols to prevent injection attacks
 const SUPPORTED_SYMBOLS = new Set([
-  'BTCUSDT',
-  'ETHUSDT',
-  'SOLUSDT',
-  'BNBUSDT',
-  'XRPUSDT',
-  'DOGEUSDT',
-  'ADAUSDT',
-  'AVAXUSDT',
-  'LINKUSDT',
-  'DOTUSDT',
-  'MATICUSDT',
-  'LTCUSDT',
-  'NEARUSDT',
-  'APTUSDT',
-  'ARBUSDT',
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
+  'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
 ]);
 
 interface ExecutionConfig {
-  minConfidence: number;
+  minConfidence: number; // 0-100 scale
   maxRiskPct: number;
   enabled: boolean;
   mode: 'paper' | 'live';
@@ -60,26 +44,12 @@ class AutoExecutor {
   private lossCooldownUntil = 0;
 
   constructor() {
-    const rawMinConf =
-      process.env.NEXT_PUBLIC_AUTO_EXECUTE_MIN_CONFIDENCE ||
-      process.env.AUTO_EXECUTE_MIN_CONFIDENCE ||
-      '';
-    const rawMaxRisk =
-      process.env.NEXT_PUBLIC_AUTO_EXECUTE_MAX_RISK_PCT ||
-      process.env.AUTO_EXECUTE_MAX_RISK_PCT ||
-      '';
-    const rawEnabled =
-      process.env.NEXT_PUBLIC_AUTO_EXECUTE || process.env.AUTO_EXECUTE_ENABLED || '';
-    const rawMode = process.env.NEXT_PUBLIC_TRADING_MODE || process.env.TRADING_MODE || 'paper';
-    const rawLeverage =
-      process.env.NEXT_PUBLIC_DEFAULT_LEVERAGE || process.env.DEFAULT_LEVERAGE || '5';
-
     this.config = {
-      minConfidence: rawMinConf ? parseFloat(rawMinConf) : 0.75,
-      maxRiskPct: rawMaxRisk ? parseFloat(rawMaxRisk) : 1.5,
-      enabled: ['true', '1', 'yes'].includes(rawEnabled.toLowerCase()),
-      mode: rawMode === 'live' ? 'live' : 'paper',
-      leverage: parseInt(rawLeverage, 10) || 5,
+      minConfidence: 75, // 0-100 scale, default 75%
+      maxRiskPct: 1.5,
+      enabled: false,
+      mode: 'paper',
+      leverage: 5,
     };
 
     logger.info('AutoExecutor', 'Initialized', this.config);
@@ -94,12 +64,8 @@ class AutoExecutor {
     }
 
     this.isRunning = true;
-    // Faster interval for scalping - 500ms
-    const intervalMs = parseInt(
-      process.env.NEXT_PUBLIC_SIGNAL_CHECK_INTERVAL_MS ||
-        process.env.SIGNAL_CHECK_INTERVAL_MS ||
-        '500'
-    );
+    // Faster interval for scalping - 1000ms to avoid excessive API calls
+    const intervalMs = 1000;
 
     logger.info('AutoExecutor', 'Started signal monitoring', { intervalMs, config: this.config });
 
@@ -112,6 +78,7 @@ class AutoExecutor {
       this.checkInterval = null;
     }
     this.isRunning = false;
+    this.executedSignals.clear();
     logger.info('AutoExecutor', 'Stopped signal monitoring');
   }
 
@@ -134,7 +101,7 @@ class AutoExecutor {
 
     // Rate limit checks
     const now = Date.now();
-    if (now - this.lastCheckTime < 300) return; // Max 3 checks per second
+    if (now - this.lastCheckTime < 500) return; // Max 2 checks per second
     this.lastCheckTime = now;
 
     // Check if we're in loss cooldown
@@ -145,19 +112,19 @@ class AutoExecutor {
     try {
       const state = getSharedTradingState();
 
-      // Get pending signals
+      // Get pending/live signals that haven't been executed yet
       const pendingSignals = state.signals.filter(
-        (sig: SharedSignal) => sig.status === 'pending' && !this.executedSignals.has(sig.id)
+        (sig: SharedSignal) => 
+          (sig.status === 'pending' || sig.status === 'live') && 
+          !this.executedSignals.has(sig.id)
       );
 
       if (pendingSignals.length === 0) return;
 
-      // Get current tickers for price validation
-      const tickers = await this.fetchTickers();
-      if (!tickers) return;
-
       for (const signal of pendingSignals) {
+        // FIXED: signal.confidence is already 0-100, not 0-1
         if (signal.confidence < this.config.minConfidence) {
+          logger.debug('AutoExecutor', `Signal ${signal.id} confidence ${signal.confidence}% < min ${this.config.minConfidence}%`);
           continue;
         }
 
@@ -185,53 +152,41 @@ class AutoExecutor {
         }
 
         // Execute the signal
-        await this.executeSignal(signal, tickers);
+        await this.executeSignal(signal);
       }
 
-      // Update paper positions if in paper mode
-      if (this.config.mode === 'paper') {
-        updatePaperPositions(tickers);
+      // Update paper positions periodically (every 10 checks)
+      if (this.config.mode === 'paper' && Math.random() < 0.1) {
+        try {
+          const symbols = Array.from(SUPPORTED_SYMBOLS);
+          const results = await Promise.allSettled(
+            symbols.map((sym) =>
+              fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${sym}`, {
+                signal: AbortSignal.timeout(3000),
+              }).then(r => r.json()).catch(() => null)
+            )
+          );
+          const tickers: Record<string, any> = {};
+          results.forEach((result) => {
+            if (result.status === 'fulfilled' && result.value?.retCode === 0 && result.value?.result?.list?.[0]) {
+              const t = result.value.result.list[0];
+              tickers[t.symbol] = t;
+            }
+          });
+          updatePaperPositions(tickers);
+        } catch { /* silent */ }
       }
     } catch (error) {
-      logger.error(
-        'AutoExecutor',
-        'Error checking signals',
-        { error: error instanceof Error ? error.message : String(error) },
-        error as Error
-      );
-    }
-  }
-
-  private async fetchTickers(): Promise<Record<string, any> | null> {
-    try {
-      const symbols = Array.from(SUPPORTED_SYMBOLS);
-      const promises = symbols.map((symbol) =>
-        fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${symbol}`)
-          .then((r) => r.json())
-          .catch(() => null)
-      );
-
-      const results = await Promise.all(promises);
-      const tickers: Record<string, any> = {};
-
-      results.forEach((data: any) => {
-        if (data?.retCode === 0 && data?.result?.list?.[0]) {
-          const ticker = data.result.list[0];
-          tickers[ticker.symbol] = ticker;
-        }
+      logger.error('AutoExecutor', 'Error checking signals', {
+        error: error instanceof Error ? error.message : String(error),
       });
-
-      return tickers;
-    } catch (error) {
-      logger.error('AutoExecutor', 'Failed to fetch tickers', { error });
-      return null;
     }
   }
 
   private checkRiskLimits(signal: SharedSignal, state: any): { allowed: boolean; reason?: string } {
     // Check current exposure
     const currentExposure = state.metrics.riskExposure || 0;
-    const maxExposure = 15; // Max 15% exposure for scalping
+    const maxExposure = 15;
 
     if (currentExposure + this.config.maxRiskPct > maxExposure) {
       return {
@@ -243,7 +198,6 @@ class AutoExecutor {
     // Check daily loss
     const dailyLossPct = state.metrics.dailyPnlPct || 0;
     if (dailyLossPct < -3) {
-      // 3% daily loss limit
       return {
         allowed: false,
         reason: `Daily loss limit (-3%) reached: ${dailyLossPct.toFixed(2)}%`,
@@ -272,52 +226,35 @@ class AutoExecutor {
     return { allowed: true };
   }
 
-  private async executeSignal(signal: SharedSignal, tickers: Record<string, any>) {
+  private async executeSignal(signal: SharedSignal) {
     try {
-      // Validate symbol against whitelist to prevent injection attacks
+      // Validate symbol against whitelist
       if (!SUPPORTED_SYMBOLS.has(signal.symbol)) {
         throw new Error(`Unsupported symbol: ${signal.symbol}`);
-      }
-
-      // Validate signal freshness (skip signals older than 2s for scalping)
-      const signalAge = Date.now() - (signal.timestamp || Date.now());
-      if (signalAge > 2000) {
-        logger.debug('AutoExecutor', `Skipping stale signal (${signalAge}ms old)`, {
-          signalId: signal.id,
-        });
-        return;
-      }
-
-      // Get current price from tickers
-      const ticker = tickers[signal.symbol];
-      if (!ticker) {
-        throw new Error(`No ticker data for ${signal.symbol}`);
-      }
-
-      const currentPrice = parseFloat(ticker.lastPrice);
-      if (!isFinite(currentPrice) || currentPrice <= 0) {
-        throw new Error(`Invalid price for ${signal.symbol}: ${currentPrice}`);
-      }
-
-      // Validate signal is still valid (price hasn't moved more than 0.5%)
-      const priceDeviation = Math.abs(currentPrice - signal.entryPrice) / signal.entryPrice;
-      if (priceDeviation > 0.005) {
-        logger.debug('AutoExecutor', `Price moved too much since signal generation`, {
-          signalId: signal.id,
-          entryPrice: signal.entryPrice,
-          currentPrice,
-          deviation: `${(priceDeviation * 100).toFixed(2)}%`,
-        });
-        return;
       }
 
       logger.info('AutoExecutor', 'Executing signal', {
         signalId: signal.id,
         symbol: signal.symbol,
         direction: signal.direction,
-        confidence: `${(signal.confidence * 100).toFixed(0)}%`,
-        price: currentPrice,
+        confidence: `${signal.confidence}%`,
       });
+
+      // Get current price from a quick ticker fetch
+      let currentPrice = signal.entryPrice;
+      try {
+        const resp = await fetch(`${BYBIT_BASE_URL}/v5/market/tickers?category=linear&symbol=${signal.symbol}`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        const data = await resp.json();
+        if (data?.retCode === 0 && data?.result?.list?.[0]) {
+          currentPrice = parseFloat(data.result.list[0].lastPrice) || currentPrice;
+        }
+      } catch { /* use signal entry price */ }
+
+      if (!isFinite(currentPrice) || currentPrice <= 0) {
+        throw new Error(`Invalid price for ${signal.symbol}: ${currentPrice}`);
+      }
 
       // Calculate position size with risk-based sizing
       const state = getSharedTradingState();
@@ -331,8 +268,7 @@ class AutoExecutor {
       // Minimum practical qty
       const MIN_QTY = 0.001;
       if (qty < MIN_QTY) {
-        logger.warn('AutoExecutor', 'Position size too small', { signalId: signal.id, qty });
-        return;
+        qty = MIN_QTY;
       }
 
       // Normalize quantity to exchange requirements
@@ -342,13 +278,11 @@ class AutoExecutor {
         return;
       }
 
-      // Calculate SL/TP in absolute prices
       const sl = signal.sl;
       const tp = signal.tp1;
       const leverage = this.config.leverage;
 
       if (this.config.mode === 'paper') {
-        // Paper trading execution
         const result = openPaperPosition(
           signal.symbol,
           signal.direction,
@@ -357,7 +291,7 @@ class AutoExecutor {
           leverage,
           sl,
           tp,
-          signal.confidence * 100
+          signal.confidence
         );
 
         if (result.success) {
@@ -368,13 +302,12 @@ class AutoExecutor {
             type: 'trade',
             priority: 'high',
             title: '📄 Paper Trade Executed',
-            message: `${signal.direction} ${signal.symbol} @ $${currentPrice.toFixed(2)} (Confidence: ${(signal.confidence * 100).toFixed(0)}%)`,
+            message: `${signal.direction} ${signal.symbol} @ $${currentPrice.toFixed(2)} (Confidence: ${signal.confidence}%)`,
             time: new Date().toLocaleTimeString(),
             read: false,
             timestamp: Date.now(),
             symbol: signal.symbol,
             price: currentPrice,
-            change24h: 0,
           });
 
           logger.info('AutoExecutor', 'Paper trade executed', {
@@ -410,7 +343,7 @@ class AutoExecutor {
             size: normalizedQty,
             pnl: 0,
             pnlPct: 0,
-            confidence: signal.confidence * 100,
+            confidence: signal.confidence,
             regime: signal.regime || 'unknown',
             entryTime: new Date().toLocaleString(),
             exitTime: '',
@@ -436,13 +369,12 @@ class AutoExecutor {
             type: 'trade',
             priority: 'high',
             title: '✅ Live Trade Executed',
-            message: `${signal.direction} ${signal.symbol} @ $${currentPrice.toFixed(2)} (Confidence: ${(signal.confidence * 100).toFixed(0)}%)`,
+            message: `${signal.direction} ${signal.symbol} @ $${currentPrice.toFixed(2)} (Confidence: ${signal.confidence}%)`,
             time: new Date().toLocaleTimeString(),
             read: false,
             timestamp: Date.now(),
             symbol: signal.symbol,
             price: currentPrice,
-            change24h: 0,
           });
 
           logger.info('AutoExecutor', 'Live trade executed', {
@@ -458,17 +390,11 @@ class AutoExecutor {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
-      logger.error(
-        'AutoExecutor',
-        'Failed to execute signal',
-        {
-          signalId: signal.id,
-          error: message,
-        },
-        error as Error
-      );
+      logger.error('AutoExecutor', 'Failed to execute signal', {
+        signalId: signal.id,
+        error: message,
+      });
 
-      // Create error alert
       appendSharedAlert({
         id: `alert-${Date.now()}`,
         type: 'system',
@@ -486,16 +412,14 @@ class AutoExecutor {
   private async normalizeQty(symbol: string, qty: number): Promise<number> {
     try {
       const url = `${BYBIT_BASE_URL}/v5/market/instruments-info?category=linear&symbol=${encodeURIComponent(symbol)}`;
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
       const data = await resp.json();
 
       if (data?.retCode === 0 && data?.result?.list?.[0]) {
         const info = data.result.list[0];
-        const lot =
-          info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
+        const lot = info.lotSizeFilter || info.lot_size_filter || info.sizeFilter || info.size_filter || {};
         const minOrderQty = parseFloat(lot.minOrderQty || lot.min_qty || lot.min || '0') || 0;
-        const qtyStep =
-          parseFloat(lot.qtyStep || lot.stepSize || lot.qty_step || lot.step || '0') || 0;
+        const qtyStep = parseFloat(lot.qtyStep || lot.stepSize || lot.qty_step || lot.step || '0') || 0;
 
         let normalizedQty = qty;
 

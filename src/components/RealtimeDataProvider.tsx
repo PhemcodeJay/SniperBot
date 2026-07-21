@@ -13,7 +13,7 @@ interface RealtimeDataProviderProps {
   pollInterval?: number;
 }
 
-export function RealtimeDataProvider({ children, pollInterval = 2000 }: RealtimeDataProviderProps) {
+export function RealtimeDataProvider({ children, pollInterval = 30000 }: RealtimeDataProviderProps) {
   const { data, loading, error, refetch } = useRealtimeData({
     pollInterval,
     enabled: true,

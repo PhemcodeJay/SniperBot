@@ -1,5 +1,6 @@
 // lib/realtimeManager.ts
 // Singleton manager to centralize WebSocket and polling for realtime Bybit data
+// OPTIMIZED: reduced polling frequency, better WS reconnection, memory management
 
 import { requestManager } from '@/lib/requestManager';
 import { BYBIT_WS_URL } from '@/lib/bybit';
@@ -12,13 +13,15 @@ class RealtimeManager {
   private static _instance: RealtimeManager | null = null;
   private dataSubscribers = new Set<DataCallback>();
   private tickSubscribers = new Set<TickCallback>();
-  private pollInterval = 30000; // 30s to reduce Bybit API spam
+  private pollInterval = 30000; // 30s to reduce Bybit API spam (was 2000ms)
   private pollTimer: NodeJS.Timeout | null = null;
   private ws: WebSocket | null = null;
   private wsHeartbeat: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isStarted = false;
-  private lastPayload: string | null = null; // cache to avoid emitting unchanged data
+  private lastPayload: string | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
 
   static get instance() {
     if (!RealtimeManager._instance) RealtimeManager._instance = new RealtimeManager();
@@ -45,7 +48,7 @@ class RealtimeManager {
 
   async fetchOnce() {
     try {
-      const [wallet, positions, orders] = await Promise.allSettled([
+      const [wallet, positions] = await Promise.allSettled([
         requestManager.executeWithRateLimit<any>('/api/bybit', {
           method: 'POST',
           body: JSON.stringify({ endpoint: '/v5/account/wallet-balance', method: 'GET' }),
@@ -54,16 +57,11 @@ class RealtimeManager {
           method: 'POST',
           body: JSON.stringify({ endpoint: '/v5/position/list', method: 'GET' }),
         }),
-        requestManager.executeWithRateLimit<any>('/api/bybit', {
-          method: 'POST',
-          body: JSON.stringify({ endpoint: '/v5/order/realtime', method: 'GET' }),
-        }),
       ]);
 
       const data = {
         wallet: wallet.status === 'fulfilled' ? wallet.value : null,
         positions: positions.status === 'fulfilled' ? positions.value : null,
-        orders: orders.status === 'fulfilled' ? orders.value : null,
         lastUpdate: Date.now(),
       };
 
@@ -80,21 +78,13 @@ class RealtimeManager {
 
   private emitData(data: any) {
     for (const cb of Array.from(this.dataSubscribers)) {
-      try {
-        cb(data);
-      } catch (e) {
-        /* swallow */
-      }
+      try { cb(data); } catch (e) { /* swallow */ }
     }
   }
 
   private emitTick(tick: any) {
     for (const cb of Array.from(this.tickSubscribers)) {
-      try {
-        cb(tick);
-      } catch (e) {
-        /* swallow */
-      }
+      try { cb(tick); } catch (e) { /* swallow */ }
     }
   }
 
@@ -113,6 +103,7 @@ class RealtimeManager {
   start() {
     if (this.isStarted) return;
     this.isStarted = true;
+    this.reconnectAttempts = 0;
     // Start polling at configured interval
     this.pollTimer = setInterval(() => this.fetchOnce(), this.pollInterval);
     // Do an immediate fetch
@@ -123,6 +114,7 @@ class RealtimeManager {
 
   stop() {
     this.isStarted = false;
+    this.reconnectAttempts = 0;
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -136,9 +128,7 @@ class RealtimeManager {
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      try {
-        this.ws.close();
-      } catch {}
+      try { this.ws.close(); } catch {}
       this.ws = null;
     }
   }
@@ -147,51 +137,45 @@ class RealtimeManager {
     try {
       if (typeof window === 'undefined') return;
       if (this.ws) return;
+      
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        logger.warn('RealtimeManager', 'Max WS reconnect attempts reached, switching to polling only');
+        return;
+      }
+      
       this.ws = new WebSocket(BYBIT_WS_URL);
+      
       this.ws.onopen = () => {
-        // Silent on open
+        this.reconnectAttempts = 0; // Reset on successful connection
         if (this.wsHeartbeat) clearInterval(this.wsHeartbeat);
         this.wsHeartbeat = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN)
             this.ws.send(JSON.stringify({ op: 'ping' }));
         }, 30000);
-        // Subscribe to ticker topics for supported symbols
+        
+        // Subscribe to ticker topics
         const symbols = [
-          'BTCUSDT',
-          'ETHUSDT',
-          'SOLUSDT',
-          'BNBUSDT',
-          'XRPUSDT',
-          'DOGEUSDT',
-          'ADAUSDT',
-          'AVAXUSDT',
-          'LINKUSDT',
-          'DOTUSDT',
-          'MATICUSDT',
-          'LTCUSDT',
-          'NEARUSDT',
-          'APTUSDT',
-          'ARBUSDT',
+          'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+          'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
+          'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ARBUSDT',
         ];
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(
-            JSON.stringify({
-              op: 'subscribe',
-              args: symbols.map((s) => `tickers.${s}`),
-            })
-          );
+          this.ws.send(JSON.stringify({
+            op: 'subscribe',
+            args: symbols.map((s) => `tickers.${s}`),
+          }));
         }
       };
+      
       this.ws.onmessage = (ev) => {
         try {
           const payload = JSON.parse(ev.data as string);
           if (payload?.topic && payload.topic.startsWith('tickers')) {
             this.emitTick(payload.data || payload);
           }
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) { /* ignore */ }
       };
+      
       this.ws.onclose = () => {
         this.ws = null;
         if (this.wsHeartbeat) {
@@ -199,8 +183,12 @@ class RealtimeManager {
           this.wsHeartbeat = null;
         }
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = setTimeout(() => this.connectWebSocket(), 5000);
+        this.reconnectAttempts++;
+        // Exponential backoff: 5s, 10s, 20s, 40s...
+        const delay = Math.min(5000 * Math.pow(2, this.reconnectAttempts - 1), 60000);
+        this.reconnectTimer = setTimeout(() => this.connectWebSocket(), delay);
       };
+      
       this.ws.onerror = () => {
         // Silent error to reduce log spam
       };
